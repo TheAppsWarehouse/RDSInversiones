@@ -18,26 +18,30 @@ import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
-import { alertService, calculateYield, calculateElapsedDays, formatElapsed, formatPrice } from '@/services/alertService';
+import {
+  alertService,
+  calculateYieldForMarket,
+  calculateElapsedDays,
+  formatPriceARS,
+  formatPriceUSD,
+  getAlertMarkets,
+} from '@/services/alertService';
 import { accountService, AccountType } from '@/services/accountService';
 import { tickerNameService } from '@/services/tickerNameService';
 import {
   Alert as AlertType,
-  AlertAction,
+  AlertTerm,
   ProfileAction,
   TargetAccounts,
-  AlertMarket,
   TickerName,
   CreateAlertPayload,
   UpdateAlertPayload,
+  CloseAlertPayload,
 } from '@/types/stock';
 import { router } from 'expo-router';
 import { useAccountType } from '@/hooks/useAccountType';
 import { useLanguage } from '@/hooks/useLanguage';
-import * as DocumentPicker from 'expo-document-picker';
-import * as XLSX from 'xlsx';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
+import { exportToExcel, importFromExcel } from '@/services/excelService';
 
 type SortType = 'newestFirst' | 'oldestFirst' | 'alphabetAZ' | 'alphabetZA' | 'currentFirst' | 'closedFirst';
 type ActiveTab = 'alerts' | 'names' | 'accounts';
@@ -50,13 +54,12 @@ interface ManagedAccount {
   new_affiliates: boolean | null;
 }
 
-// kept for legacy import compatibility
 const ADMIN_ALLOWED_TYPES: AccountType[] = ['Free', 'Affiliate'];
 const DEV_ALLOWED_TYPES: AccountType[] = ['Free', 'Affiliate', 'Admin'];
 
-// Profile actions for New Alert (initial indications: Buy / Sell / Refrain)
+// Profile actions for New Alert
 const CREATE_PROFILE_ACTIONS: ProfileAction[] = ['Buy', 'Sell', 'Refrain'];
-// Profile actions for Update Alert (updating indications: Double / Hold / Close / Keep Out)
+// Profile actions for Update Alert
 const UPDATE_PROFILE_ACTIONS: ProfileAction[] = ['Double', 'Hold', 'Close', 'Keep Out'];
 
 export default function ConfigurationScreen() {
@@ -83,35 +86,48 @@ export default function ConfigurationScreen() {
   const [exportingAlerts, setExportingAlerts] = useState(false);
   const [importingAlerts, setImportingAlerts] = useState(false);
 
-  // Create alert form
+  // ── Create alert form state ────────────────────────────────────────────────
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newTicker, setNewTicker] = useState('');
-  const [newMarket, setNewMarket] = useState<AlertMarket>('EEUU');
+  const [newTerm, setNewTerm] = useState<AlertTerm>('Short');
   const [newTargetAccounts, setNewTargetAccounts] = useState<TargetAccounts>('Subscribers');
-  const [newAction, setNewAction] = useState<AlertAction | null>('Buy');
-  const [newEntryPrice, setNewEntryPrice] = useState('');
-  const [newReEntryPrice, setNewReEntryPrice] = useState('');
-  const [newThreeMonthsGoal, setNewThreeMonthsGoal] = useState('');
   const [newActionConservative, setNewActionConservative] = useState<ProfileAction>('Refrain');
   const [newActionModerate, setNewActionModerate] = useState<ProfileAction>('Refrain');
   const [newActionAggressive, setNewActionAggressive] = useState<ProfileAction>('Refrain');
+  const [newActionUltraAggressive, setNewActionUltraAggressive] = useState<ProfileAction>('Refrain');
+  const [newEntryPriceARS, setNewEntryPriceARS] = useState('');
+  const [newReEntryPriceARS, setNewReEntryPriceARS] = useState('');
+  const [newEntryPriceUSD, setNewEntryPriceUSD] = useState('');
+  const [newReEntryPriceUSD, setNewReEntryPriceUSD] = useState('');
+  const [newShortTermGoal, setNewShortTermGoal] = useState('');
+  const [newLongTermGoal, setNewLongTermGoal] = useState('');
 
-  // Update alert form
+  const [newAlertDetails, setNewAlertDetails] = useState('');
+  const [newAlertDetailEn, setNewAlertDetailEn] = useState('');
+
+  // ── Update alert form state ────────────────────────────────────────────────
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [updatingAlert, setUpdatingAlert] = useState(false);
   const [editingAlert, setEditingAlert] = useState<AlertType | null>(null);
-  const [editCurrentPrice, setEditCurrentPrice] = useState('');
-  const [editThreeMonthsGoal, setEditThreeMonthsGoal] = useState('');
+  const [editCurrentPriceARS, setEditCurrentPriceARS] = useState('');
+  const [editCurrentPriceUSD, setEditCurrentPriceUSD] = useState('');
+  const [editShortTermGoal, setEditShortTermGoal] = useState('');
+  const [editLongTermGoal, setEditLongTermGoal] = useState('');
   const [editActionConservative, setEditActionConservative] = useState<ProfileAction>('Hold');
   const [editActionModerate, setEditActionModerate] = useState<ProfileAction>('Hold');
   const [editActionAggressive, setEditActionAggressive] = useState<ProfileAction>('Hold');
+  const [editActionUltraAggressive, setEditActionUltraAggressive] = useState<ProfileAction>('Hold');
 
-  // Close alert form
+  const [editAlertDetails, setEditAlertDetails] = useState('');
+  const [editAlertDetailEn, setEditAlertDetailEn] = useState('');
+
+  // ── Close alert form state ─────────────────────────────────────────────────
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [closingAlert, setClosingAlert] = useState(false);
   const [closingAlertTarget, setClosingAlertTarget] = useState<AlertType | null>(null);
-  const [closePrice, setClosePrice] = useState('');
+  const [closePriceARS, setClosePriceARS] = useState('');
+  const [closePriceUSD, setClosePriceUSD] = useState('');
 
   // ─── Ticker Names state ────────────────────────────────────────────────────
   const [tickerNames, setTickerNames] = useState<TickerName[]>([]);
@@ -121,6 +137,8 @@ export default function ConfigurationScreen() {
   const [showEditNameModal, setShowEditNameModal] = useState(false);
   const [newNameTicker, setNewNameTicker] = useState('');
   const [newNameValue, setNewNameValue] = useState('');
+  const [newNameBalanzUrlArg, setNewNameBalanzUrlArg] = useState('');
+  const [newNameBalanzUrlUsa, setNewNameBalanzUrlUsa] = useState('');
   const [savingName, setSavingName] = useState(false);
   const [namesSearch, setNamesSearch] = useState('');
   const [exportingNames, setExportingNames] = useState(false);
@@ -140,7 +158,10 @@ export default function ConfigurationScreen() {
   const [importingAccounts, setImportingAccounts] = useState(false);
   const [togglingNewAffiliates, setTogglingNewAffiliates] = useState<string | null>(null);
 
-  // Dev: Free/Affiliate/Admin; Admin: Free/Affiliate
+  // ─── Alert Details modal (config cards) ──────────────────────────────────
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [detailsAlert, setDetailsAlert] = useState<AlertType | null>(null);
+
   const allowedAccountTypes: AccountType[] = userIsDev ? DEV_ALLOWED_TYPES : ADMIN_ALLOWED_TYPES;
   const getEditableTypesForAccount = (account: ManagedAccount): AccountType[] => {
     if (userIsDev) return ['Free', 'Affiliate', 'Admin'];
@@ -218,33 +239,52 @@ export default function ConfigurationScreen() {
 
   const resetCreateForm = () => {
     setNewTicker('');
-    setNewMarket('EEUU');
+    setNewTerm('Short');
     setNewTargetAccounts('Subscribers');
-    setNewAction('Buy');
-    setNewEntryPrice('');
-    setNewReEntryPrice('');
-    setNewThreeMonthsGoal('');
     setNewActionConservative('Refrain');
     setNewActionModerate('Refrain');
     setNewActionAggressive('Refrain');
+    setNewActionUltraAggressive('Refrain');
+    setNewEntryPriceARS('');
+    setNewReEntryPriceARS('');
+    setNewEntryPriceUSD('');
+    setNewReEntryPriceUSD('');
+    setNewShortTermGoal('');
+    setNewLongTermGoal('');
+
+    setNewAlertDetails('');
+    setNewAlertDetailEn('');
   };
 
   const handleCreateAlert = async () => {
     if (!newTicker.trim()) { showAlert(t('error'), 'Ticker is required'); return; }
+    const entryARS = newEntryPriceARS ? parseFloat(newEntryPriceARS) : null;
+    const entryUSD = newEntryPriceUSD ? parseFloat(newEntryPriceUSD) : null;
+    if (entryARS == null && entryUSD == null) {
+      showAlert(t('error'), language === 'es'
+        ? 'Debe ingresar al menos un precio de entrada (AR$ o US$)'
+        : 'At least one Entry Price (AR$ or US$) is required');
+      return;
+    }
     setCreating(true);
     const payload: CreateAlertPayload = {
       ticker: newTicker.trim().toUpperCase(),
-      market: newMarket,
+      term: newTerm,
       target_accounts: newTargetAccounts,
-      action: newAction,
-      entry_price: newEntryPrice ? parseFloat(newEntryPrice) : null,
-      re_entry_price: newReEntryPrice ? parseFloat(newReEntryPrice) : null,
-      three_months_goal: newThreeMonthsGoal ? parseFloat(newThreeMonthsGoal) : null,
       action_conservative: newActionConservative,
       action_moderate: newActionModerate,
       action_aggressive: newActionAggressive,
+      action_ultra_aggressive: newActionUltraAggressive,
+      entry_price_ars: entryARS,
+      re_entry_price_ars: newReEntryPriceARS ? parseFloat(newReEntryPriceARS) : null,
+      entry_price_usd: entryUSD,
+      re_entry_price_usd: newReEntryPriceUSD ? parseFloat(newReEntryPriceUSD) : null,
+      short_term_goal: newShortTermGoal ? parseFloat(newShortTermGoal) : null,
+      long_term_goal: newLongTermGoal ? parseFloat(newLongTermGoal) : null,
+
+      alert_details: newAlertDetails.trim() || null,
+      alert_detail_en: newAlertDetailEn.trim() || null,
     };
-    // Admin/Dev are always subscribers; push enabled based on their preference
     const { error } = await alertService.createAlert(payload, true, notificationsEnabled);
     setCreating(false);
     if (error) { showAlert(t('error'), error); return; }
@@ -256,23 +296,42 @@ export default function ConfigurationScreen() {
 
   const openUpdateModal = (alert: AlertType) => {
     setEditingAlert(alert);
-    setEditCurrentPrice(alert.current_price?.toString() ?? '');
-    setEditThreeMonthsGoal(alert.three_months_goal?.toString() ?? '');
-    setEditActionConservative((['Double', 'Hold', 'Close', 'Keep Out'] as ProfileAction[]).includes(alert.action_conservative) ? alert.action_conservative : 'Hold');
-    setEditActionModerate((['Double', 'Hold', 'Close', 'Keep Out'] as ProfileAction[]).includes(alert.action_moderate) ? alert.action_moderate : 'Hold');
-    setEditActionAggressive((['Double', 'Hold', 'Close', 'Keep Out'] as ProfileAction[]).includes(alert.action_aggressive) ? alert.action_aggressive : 'Hold');
+    setEditCurrentPriceARS(alert.current_price_ars?.toString() ?? '');
+    setEditCurrentPriceUSD(alert.current_price_usd?.toString() ?? (alert.market === 'EEUU' ? alert.current_price?.toString() ?? '' : ''));
+    setEditShortTermGoal((alert.short_term_goal ?? alert.three_months_goal)?.toString() ?? '');
+    setEditLongTermGoal(alert.long_term_goal?.toString() ?? '');
+    // Preserve 'Refrain' as a locked value; convert other non-update actions to 'Hold'
+    const toUpdateAction = (v: ProfileAction): ProfileAction => {
+      if (v === 'Refrain') return 'Refrain'; // locked — cannot be changed in updates
+      return (['Double', 'Hold', 'Close', 'Keep Out'] as ProfileAction[]).includes(v) ? v : 'Hold';
+    };
+    setEditActionConservative(toUpdateAction(alert.action_conservative));
+    setEditActionModerate(toUpdateAction(alert.action_moderate));
+    setEditActionAggressive(toUpdateAction(alert.action_aggressive));
+    setEditActionUltraAggressive(toUpdateAction(alert.action_ultra_aggressive ?? 'Hold'));
+
+    setEditAlertDetails(alert.alert_details ?? '');
+    setEditAlertDetailEn(alert.alert_detail_en ?? '');
     setShowUpdateModal(true);
   };
 
   const handleUpdateAlert = async () => {
     if (!editingAlert) return;
     setUpdatingAlert(true);
+    const { hasARS, hasUSD } = getAlertMarkets(editingAlert);
+    // If the original action was 'Refrain', it is locked and cannot be changed
     const payload: UpdateAlertPayload = {
-      current_price: editCurrentPrice ? parseFloat(editCurrentPrice) : null,
-      three_months_goal: editThreeMonthsGoal ? parseFloat(editThreeMonthsGoal) : null,
-      action_conservative: editActionConservative,
-      action_moderate: editActionModerate,
-      action_aggressive: editActionAggressive,
+      current_price_ars: hasARS && editCurrentPriceARS ? parseFloat(editCurrentPriceARS) : null,
+      current_price_usd: hasUSD && editCurrentPriceUSD ? parseFloat(editCurrentPriceUSD) : null,
+      short_term_goal: editShortTermGoal ? parseFloat(editShortTermGoal) : null,
+      long_term_goal: editLongTermGoal ? parseFloat(editLongTermGoal) : null,
+      action_conservative: editingAlert.action_conservative === 'Refrain' ? 'Refrain' : editActionConservative,
+      action_moderate: editingAlert.action_moderate === 'Refrain' ? 'Refrain' : editActionModerate,
+      action_aggressive: editingAlert.action_aggressive === 'Refrain' ? 'Refrain' : editActionAggressive,
+      action_ultra_aggressive: (editingAlert.action_ultra_aggressive ?? 'Refrain') === 'Refrain' ? 'Refrain' : editActionUltraAggressive,
+
+      alert_details: editAlertDetails.trim() || null,
+      alert_detail_en: editAlertDetailEn.trim() || null,
     };
     const { error } = await alertService.updateAlert(editingAlert.id, payload, editingAlert, true, notificationsEnabled);
     setUpdatingAlert(false);
@@ -285,21 +344,25 @@ export default function ConfigurationScreen() {
 
   const openCloseModal = (alert: AlertType) => {
     setClosingAlertTarget(alert);
-    setClosePrice(alert.current_price?.toString() ?? '');
+    const { hasARS, hasUSD } = getAlertMarkets(alert);
+    setClosePriceARS(hasARS ? (alert.current_price_ars?.toString() ?? '') : '');
+    setClosePriceUSD(hasUSD ? (alert.current_price_usd?.toString() ?? alert.current_price?.toString() ?? '') : '');
     setShowCloseModal(true);
   };
 
   const handleCloseAlert = async () => {
     if (!closingAlertTarget) return;
     setClosingAlert(true);
-    const { error } = await alertService.closeAlert(closingAlertTarget.id, {
-      closing_price: closePrice ? parseFloat(closePrice) : null,
-    }, closingAlertTarget, true, notificationsEnabled);
+    const payload: CloseAlertPayload = {
+      closing_price_ars: closePriceARS ? parseFloat(closePriceARS) : null,
+      closing_price_usd: closePriceUSD ? parseFloat(closePriceUSD) : null,
+    };
+    const { error } = await alertService.closeAlert(closingAlertTarget.id, payload, closingAlertTarget, true, notificationsEnabled);
     setClosingAlert(false);
     if (error) { showAlert(t('error'), error); return; }
     setShowCloseModal(false);
     setClosingAlertTarget(null);
-    setClosePrice('');
+    setClosePriceARS(''); setClosePriceUSD('');
     loadAlerts();
     showAlert(t('success'), t('alertClosedSuccess'));
   };
@@ -323,108 +386,50 @@ export default function ConfigurationScreen() {
   const handleExportAlerts = async () => {
     try {
       setExportingAlerts(true);
-      const excelData = displayAlerts.length > 0
+      const rows = displayAlerts.length > 0
         ? displayAlerts.map((a) => ({
             'Ticker': a.ticker,
-            'Market': a.market ?? 'EEUU',
             'Target Accounts': a.target_accounts,
             'Alert Condition': a.alert_condition,
-            'Action': a.action ?? '',
-            'Entry Price': a.entry_price ?? '',
-            'Re-Entry Price': a.re_entry_price ?? '',
-            'Current Price': a.current_price ?? '',
-            'Closing Price': a.closing_price ?? '',
-            '3-Month Goal (%)': a.three_months_goal ?? '',
+            'Entry Price ARS': a.entry_price_ars ?? '',
+            'Re-Entry Price ARS': a.re_entry_price_ars ?? '',
+            'Current Price ARS': a.current_price_ars ?? '',
+            'Closing Price ARS': a.closing_price_ars ?? '',
+            'Entry Price USD': a.entry_price_usd ?? '',
+            'Re-Entry Price USD': a.re_entry_price_usd ?? '',
+            'Current Price USD': a.current_price_usd ?? '',
+            'Closing Price USD': a.closing_price_usd ?? '',
+            'Short-Term Goal (%)': a.short_term_goal ?? '',
+            'Long-Term Goal (%)': a.long_term_goal ?? '',
             'Conservative': a.action_conservative,
             'Moderate': a.action_moderate,
             'Aggressive': a.action_aggressive,
+            'Ultra-Aggressive': a.action_ultra_aggressive ?? '',
+            'Balanz URL': a.balanz_url ?? '',
+            'Alert Details': a.alert_details ?? '',
             'Opening Date': a.opening_date,
             'Closing Date': a.closing_date ?? '',
           }))
-        : [{ 'Ticker': '', 'Market': '', 'Target Accounts': '', 'Alert Condition': '', 'Action': '', 'Entry Price': '', 'Re-Entry Price': '', 'Current Price': '', 'Closing Price': '', '3-Month Goal (%)': '', 'Conservative': '', 'Moderate': '', 'Risky': '', 'Opening Date': '', 'Closing Date': '' }];
-      const ws = XLSX.utils.json_to_sheet(excelData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Alerts');
-      const buf = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-      const fileUri = FileSystem.documentDirectory + `alerts_${new Date().toISOString().split('T')[0]}.xlsx`;
-      await FileSystem.writeAsStringAsync(fileUri, buf, { encoding: FileSystem.EncodingType.Base64 });
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) { await Sharing.shareAsync(fileUri); } else { showAlert(t('success'), 'File saved'); }
+        : [{ 'Ticker': '' }];
+      await exportToExcel('Alerts', rows, `alerts_${new Date().toISOString().split('T')[0]}.xlsx`);
       setExportingAlerts(false);
     } catch { setExportingAlerts(false); showAlert(t('error'), 'Failed to export alerts.'); }
   };
 
-  const handleImportAlerts = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-        copyToCacheDirectory: true,
-      });
-      if (result.canceled) return;
-      setImportingAlerts(true);
-      const fileContent = await FileSystem.readAsStringAsync(result.assets[0].uri, { encoding: FileSystem.EncodingType.Base64 });
-      const wb = XLSX.read(fileContent, { type: 'base64' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
-      const validTargets = ['Subscribers', 'Free-Accounts'];
-      const validActions = ['Buy', 'Sell'];
-      const validProfileActions = ['Buy', 'Sell', 'Refrain', 'Double', 'Hold', 'Close', 'Keep Out'];
-      const validMarkets = ['EEUU', 'ARG'];
-      const rows: CreateAlertPayload[] = [];
-      for (let i = 1; i < data.length; i++) {
-        const row = data[i];
-        if (!row || row.length < 1) continue;
-        const ticker = row[0]?.toString().trim().toUpperCase();
-        if (!ticker) continue;
-        const market = validMarkets.includes(row[1]?.toString().trim()) ? row[1].toString().trim() : 'EEUU';
-        const target = row[2]?.toString().trim();
-        const action = row[3]?.toString().trim();
-        const entryPrice = row[4] ? parseFloat(row[4]) : null;
-        const reEntryPrice = row[5] ? parseFloat(row[5]) : null;
-        const threeMonths = row[6] ? parseFloat(row[6]) : null;
-        const conservative = validProfileActions.includes(row[7]?.toString().trim()) ? row[7].toString().trim() : 'Refrain';
-        const moderate = validProfileActions.includes(row[8]?.toString().trim()) ? row[8].toString().trim() : 'Refrain';
-        const risky = validProfileActions.includes(row[9]?.toString().trim()) ? row[9].toString().trim() : 'Refrain';
-        rows.push({
-          ticker,
-          market: market as AlertMarket,
-          target_accounts: validTargets.includes(target) ? target as TargetAccounts : 'Subscribers',
-          action: validActions.includes(action) ? action as AlertAction : null,
-          entry_price: isNaN(entryPrice as number) ? null : entryPrice,
-          re_entry_price: isNaN(reEntryPrice as number) ? null : reEntryPrice,
-          three_months_goal: isNaN(threeMonths as number) ? null : threeMonths,
-          action_conservative: conservative as ProfileAction,
-          action_moderate: moderate as ProfileAction,
-          action_aggressive: risky as ProfileAction,
-        });
-      }
-      if (rows.length === 0) { setImportingAlerts(false); showAlert(t('error'), 'No valid rows found. Columns: Ticker | Market | Target | Action | Entry Price | Re-Entry Price | 3M Goal | Conservative | Moderate | Risky'); return; }
-      const { successCount, failedCount, errors } = await alertService.batchImportAlerts(rows);
-      setImportingAlerts(false);
-      if (errors.length > 0) {
-        Alert.alert(t('importResultsTitle'), `Imported: ${successCount}\nFailed: ${failedCount}\n\nErrors:\n${errors.slice(0, 5).join('\n')}`, [{ text: 'OK', onPress: () => loadAlerts() }]);
-      } else {
-        showAlert(t('success'), `Imported ${successCount} alerts!`);
-        loadAlerts();
-      }
-    } catch { setImportingAlerts(false); showAlert(t('error'), 'Failed to import file.'); }
-  };
-
   const handleShareAlert = async (item: AlertType) => {
     const lang = language;
-    const market = item.market ?? 'EEUU';
-    const fmtP = (val: number | null) => formatPrice(val, market);
-    const formatPct = (val: number | null) => {
-      if (val == null) return '-';
-      const s = val >= 0 ? '+' : '';
-      return `${s}${val.toFixed(2)}%`;
-    };
-    const yieldVal = calculateYield(item);
+    const { hasARS, hasUSD } = getAlertMarkets(item);
     const isClosed = item.alert_condition === 'Closed';
-    // Updated = current state + current_price has been set at least once
-    const isUpdated = !isClosed && item.current_price != null;
-    // Creation = current state + never updated (no current_price yet)
-    const isCreation = !isClosed && item.current_price == null;
+    const isUpdated = !isClosed && (item.current_price_ars != null || item.current_price_usd != null);
+    const stGoal = item.short_term_goal ?? item.three_months_goal;
+    // balanz_url_arg from TickerNames (enriched at fetch time)
+    const balanzLink = item.balanz_url_arg ?? null;
+
+    // Raw number formatters (no currency prefix — prefix is added inline)
+    const numARS = (val: number) =>
+      val.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    const numUSD = (val: number) =>
+      val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     const profileActionLabel = (a: string) => {
       switch (a) {
@@ -438,48 +443,113 @@ export default function ConfigurationScreen() {
       }
     };
 
-    let message = '';
+    const termLabel = item.term === 'Short'
+      ? (lang === 'es' ? 'Corto Plazo' : 'Short-Term')
+      : (lang === 'es' ? 'Largo Plazo' : 'Long-Term');
+
+    // Entry price line: (*1) combined if both currencies, (*2) ARS-only otherwise
+    const entryLine = (): string | null => {
+      if (hasUSD && item.entry_price_usd != null) {
+        const arsRef = hasARS && item.entry_price_ars != null
+          ? ` (referencia CEDEAR: AR$ ${numARS(item.entry_price_ars)})`
+          : '';
+        return `💱 ${lang === 'es' ? 'Precio de Entrada' : 'Entry Price'}: US$ ${numUSD(item.entry_price_usd)}${arsRef}`;
+      }
+      if (hasARS && item.entry_price_ars != null) {
+        return `💱 ${lang === 'es' ? 'Precio de Entrada' : 'Entry Price'}: AR$ ${numARS(item.entry_price_ars)}`;
+      }
+      return null;
+    };
+
+    // Re-entry price line: same (*1)/(*2) logic
+    const reEntryLine = (): string | null => {
+      if (hasUSD && item.re_entry_price_usd != null) {
+        const arsRef = hasARS && item.re_entry_price_ars != null
+          ? ` (referencia CEDEAR: AR$ ${numARS(item.re_entry_price_ars)})`
+          : '';
+        return `💱 ${lang === 'es' ? 'Precio Re-Entrada' : 'Re-entry Price'}: US$ ${numUSD(item.re_entry_price_usd)}${arsRef}`;
+      }
+      if (hasARS && item.re_entry_price_ars != null) {
+        return `💱 ${lang === 'es' ? 'Precio Re-Entrada' : 'Re-entry Price'}: AR$ ${numARS(item.re_entry_price_ars)}`;
+      }
+      return null;
+    };
+
+    // Current price line for updates
+    const currentPriceLine = (): string | null => {
+      if (hasUSD && item.current_price_usd != null) {
+        const arsRef = hasARS && item.current_price_ars != null
+          ? ` (referencia CEDEAR: AR$ ${numARS(item.current_price_ars)})`
+          : '';
+        return `💱 ${lang === 'es' ? 'Precio Actual' : 'Current Price'}: US$ ${numUSD(item.current_price_usd)}${arsRef}`;
+      }
+      if (hasARS && item.current_price_ars != null) {
+        return `💱 ${lang === 'es' ? 'Precio Actual' : 'Current Price'}: AR$ ${numARS(item.current_price_ars)}`;
+      }
+      return null;
+    };
+
+    // Closing price line for closed alerts
+    const closingPriceLine = (): string | null => {
+      if (hasUSD && item.closing_price_usd != null) {
+        const arsRef = hasARS && item.closing_price_ars != null
+          ? ` (referencia CEDEAR: AR$ ${numARS(item.closing_price_ars)})`
+          : '';
+        return `💱 ${lang === 'es' ? 'Precio de Cierre' : 'Closing Price'}: US$ ${numUSD(item.closing_price_usd)}${arsRef}`;
+      }
+      if (hasARS && item.closing_price_ars != null) {
+        return `💱 ${lang === 'es' ? 'Precio de Cierre' : 'Closing Price'}: AR$ ${numARS(item.closing_price_ars)}`;
+      }
+      return null;
+    };
+
+    const compact = (arr: (string | null)[]): string[] => arr.filter((l): l is string => l != null);
+
+    let lines: string[];
 
     if (isClosed) {
-      // ── Alert Closing Message ──
-      const lines: string[] = [
+      lines = compact([
         `🚨 ${lang === 'es' ? 'Alerta de Cierre' : 'Closing Alert'}: ${item.ticker}${item.ticker_name ? ` (${item.ticker_name})` : ''}`,
-        ...(item.entry_price != null ? [`💱 ${lang === 'es' ? 'Precio de Entrada' : 'Entry Price'}: ${fmtP(item.entry_price)}`] : []),
-        ...(item.closing_price != null ? [`💱 ${lang === 'es' ? 'Precio de Cierre' : 'Closing Price'}: ${fmtP(item.closing_price)}`] : []),
-        ...(yieldVal != null ? [`🚀 ${lang === 'es' ? 'Rendimiento' : 'Yield'}: ${formatPct(yieldVal)}`] : []),
-      ];
-      message = lines.join('\n');
+        `🗓️ ${lang === 'es' ? 'Plazo' : 'Term'}: ${termLabel}`,
+        entryLine(),
+        closingPriceLine(),
+        stGoal != null ? `🎯 ${lang === 'es' ? 'Meta Corto Plazo' : 'Short-Term Goal'}: ${Math.round(stGoal)}%` : null,
+        item.long_term_goal != null ? `🎯 ${lang === 'es' ? 'Meta Largo Plazo' : 'Long-Term Goal'}: ${Math.round(item.long_term_goal)}%` : null,
+        balanzLink ? `🔗 ${lang === 'es' ? 'Operar con Balanz' : 'Trade with Balanz'}: ${balanzLink}` : null,
+        item.alert_details ? `✉️ ${lang === 'es' ? 'Detalles' : 'Alert Details'}: ${item.alert_details}` : null,
+      ]);
     } else if (isUpdated) {
-      // ── Alert Update Message ──
-      const elapsedDays = calculateElapsedDays(item);
-      const lines: string[] = [
+      lines = compact([
         `🚨 ${lang === 'es' ? 'Actualización' : 'Update'}: ${item.ticker}${item.ticker_name ? ` (${item.ticker_name})` : ''}`,
-        `👨\u200d🦳 ${lang === 'es' ? 'Perfiles Conservadores' : 'Conservative Profiles'}: ${profileActionLabel(item.action_conservative)}`,
-        `👩\u200d🌾 ${lang === 'es' ? 'Perfiles Moderados' : 'Moderate Profiles'}: ${profileActionLabel(item.action_moderate)}`,
-        `👽 ${lang === 'es' ? 'Perfiles Agresivos' : 'Aggressive Profiles'}: ${profileActionLabel(item.action_aggressive)}`,
-        ...(item.three_months_goal != null ? [`🎯 ${lang === 'es' ? 'Meta 3 meses' : '3-Month Goal'}: ${item.three_months_goal.toFixed(1)}%`] : []),
-        `⏰ ${lang === 'es' ? 'Tiempo transcurrido' : 'Elapsed time'}: ${formatElapsed(elapsedDays)}`,
-      ];
-      message = lines.join('\n');
+        `🗓️ ${lang === 'es' ? 'Plazo' : 'Term'}: ${termLabel}`,
+        `👴🏻 ${lang === 'es' ? 'Conservador' : 'Conservative'}: ${profileActionLabel(item.action_conservative)}`,
+        `👩‍🌾 ${lang === 'es' ? 'Moderado' : 'Moderate'}: ${profileActionLabel(item.action_moderate)}`,
+        `👽 ${lang === 'es' ? 'Agresivo' : 'Aggressive'}: ${profileActionLabel(item.action_aggressive)}`,
+        `🛸 Ultra-${lang === 'es' ? 'Agresivo' : 'Aggressive'}: ${profileActionLabel(item.action_ultra_aggressive ?? 'Refrain')}`,
+        currentPriceLine(),
+        stGoal != null ? `🎯 ${lang === 'es' ? 'Meta Corto Plazo' : 'Short-Term Goal'}: ${Math.round(stGoal)}%` : null,
+        item.long_term_goal != null ? `🎯 ${lang === 'es' ? 'Meta Largo Plazo' : 'Long-Term Goal'}: ${Math.round(item.long_term_goal)}%` : null,
+        balanzLink ? `🔗 ${lang === 'es' ? 'Operar con Balanz' : 'Trade with Balanz'}: ${balanzLink}` : null,
+        item.alert_details ? `✉️ ${lang === 'es' ? 'Detalles' : 'Alert Details'}: ${item.alert_details}` : null,
+      ]);
     } else {
-      // ── Alert Creation Message ──
-      const alertTitle = item.action === 'Buy'
-        ? (lang === 'es' ? 'Alerta de Compra' : 'Buy Alert')
-        : item.action === 'Sell'
-          ? (lang === 'es' ? 'Alerta de Venta' : 'Sell Alert')
-          : (lang === 'es' ? 'Alerta' : 'Alert');
-      const lines: string[] = [
-        `🚨 ${alertTitle}: ${item.ticker}${item.ticker_name ? ` (${item.ticker_name})` : ''}`,
-        `👨\u200d🦳 ${lang === 'es' ? 'Perfiles Conservadores' : 'Conservative Profiles'}: ${profileActionLabel(item.action_conservative)}`,
-        `👩\u200d🌾 ${lang === 'es' ? 'Perfiles Moderados' : 'Moderate Profiles'}: ${profileActionLabel(item.action_moderate)}`,
-        `👽 ${lang === 'es' ? 'Perfiles Agresivos' : 'Aggressive Profiles'}: ${profileActionLabel(item.action_aggressive)}`,
-        ...(item.entry_price != null ? [`💱 ${lang === 'es' ? 'Precio de Entrada' : 'Entry Price'}: ${fmtP(item.entry_price)}`] : []),
-        ...(item.re_entry_price != null ? [`💱 ${lang === 'es' ? 'Precio de Re-Entrada' : 'Re-Entry Price'}: ${fmtP(item.re_entry_price)}`] : []),
-        ...(item.three_months_goal != null ? [`🎯 ${lang === 'es' ? 'Meta 3 meses' : '3-Month Goal'}: ${item.three_months_goal.toFixed(1)}%`] : []),
-      ];
-      message = lines.join('\n');
+      lines = compact([
+        `🚨 ${lang === 'es' ? 'Nueva Alerta' : 'New Alert'}: ${item.ticker}${item.ticker_name ? ` (${item.ticker_name})` : ''}`,
+        `🗓️ ${lang === 'es' ? 'Plazo' : 'Term'}: ${termLabel}`,
+        `👴🏻 ${lang === 'es' ? 'Conservador' : 'Conservative'}: ${profileActionLabel(item.action_conservative)}`,
+        `👩‍🌾 ${lang === 'es' ? 'Moderado' : 'Moderate'}: ${profileActionLabel(item.action_moderate)}`,
+        `👽 ${lang === 'es' ? 'Agresivo' : 'Aggressive'}: ${profileActionLabel(item.action_aggressive)}`,
+        `🛸 Ultra-${lang === 'es' ? 'Agresivo' : 'Aggressive'}: ${profileActionLabel(item.action_ultra_aggressive ?? 'Refrain')}`,
+        entryLine(),
+        reEntryLine(),
+        stGoal != null ? `🎯 ${lang === 'es' ? 'Meta Corto Plazo' : 'Short-Term Goal'}: ${Math.round(stGoal)}%` : null,
+        item.long_term_goal != null ? `🎯 ${lang === 'es' ? 'Meta Largo Plazo' : 'Long-Term Goal'}: ${Math.round(item.long_term_goal)}%` : null,
+        balanzLink ? `🔗 ${lang === 'es' ? 'Operar con Balanz' : 'Trade with Balanz'}: ${balanzLink}` : null,
+        item.alert_details ? `✉️ ${lang === 'es' ? 'Detalles' : 'Alert Details'}: ${item.alert_details}` : null,
+      ]);
     }
 
+    const message = lines.join('\n');
     const url = `whatsapp://send?text=${encodeURIComponent(message)}`;
     try {
       const supported = await Linking.canOpenURL(url);
@@ -507,11 +577,16 @@ export default function ConfigurationScreen() {
   const handleSaveName = async () => {
     if (!newNameTicker.trim() || !newNameValue.trim()) { showAlert(t('error'), 'Ticker and Name are required'); return; }
     setSavingName(true);
-    const { error } = await tickerNameService.upsertTickerName(newNameTicker.trim(), newNameValue.trim());
+    const { error } = await tickerNameService.upsertTickerName(
+      newNameTicker.trim(),
+      newNameValue.trim(),
+      newNameBalanzUrlArg.trim() || null,
+      newNameBalanzUrlUsa.trim() || null
+    );
     setSavingName(false);
     if (error) { showAlert(t('error'), error); return; }
     setShowAddNameModal(false);
-    setNewNameTicker(''); setNewNameValue('');
+    setNewNameTicker(''); setNewNameValue(''); setNewNameBalanzUrlArg(''); setNewNameBalanzUrlUsa('');
     loadTickerNames(); loadAlerts();
     showAlert(t('success'), 'Name saved successfully');
   };
@@ -519,10 +594,15 @@ export default function ConfigurationScreen() {
   const handleUpdateName = async () => {
     if (!editingName || !newNameValue.trim()) { showAlert(t('error'), 'Name is required'); return; }
     setSavingName(true);
-    const { error } = await tickerNameService.upsertTickerName(editingName.ticker, newNameValue.trim());
+    const { error } = await tickerNameService.upsertTickerName(
+      editingName.ticker,
+      newNameValue.trim(),
+      newNameBalanzUrlArg.trim() || null,
+      newNameBalanzUrlUsa.trim() || null
+    );
     setSavingName(false);
     if (error) { showAlert(t('error'), error); return; }
-    setShowEditNameModal(false); setEditingName(null); setNewNameValue('');
+    setShowEditNameModal(false); setEditingName(null); setNewNameValue(''); setNewNameBalanzUrlArg(''); setNewNameBalanzUrlUsa('');
     loadTickerNames(); loadAlerts();
     showAlert(t('success'), 'Name updated successfully');
   };
@@ -541,43 +621,36 @@ export default function ConfigurationScreen() {
   const handleExportNames = async () => {
     try {
       setExportingNames(true);
-      const excelData = tickerNames.length > 0
-        ? tickerNames.map((n) => ({ 'Ticker': n.ticker, 'Name': n.name }))
-        : [{ 'Ticker': '', 'Name': '' }];
-      const ws = XLSX.utils.json_to_sheet(excelData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Ticker Names');
-      const buf = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-      const fileUri = FileSystem.documentDirectory + `ticker_names_${new Date().toISOString().split('T')[0]}.xlsx`;
-      await FileSystem.writeAsStringAsync(fileUri, buf, { encoding: FileSystem.EncodingType.Base64 });
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) { await Sharing.shareAsync(fileUri); } else { showAlert(t('success'), 'File saved'); }
+      const rows = tickerNames.length > 0
+        ? tickerNames.map((n) => ({
+            'Ticker': n.ticker,
+            'Name': n.name,
+            'Balanz URL (ARG)': n.balanz_url_arg ?? '',
+            'Balanz URL (USA)': n.balanz_url_usa ?? '',
+          }))
+        : [{ 'Ticker': '', 'Name': '', 'Balanz URL (ARG)': '', 'Balanz URL (USA)': '' }];
+      await exportToExcel('Ticker Names', rows, `ticker_names_${new Date().toISOString().split('T')[0]}.xlsx`);
       setExportingNames(false);
     } catch { setExportingNames(false); showAlert(t('error'), 'Failed to export.'); }
   };
 
   const handleImportNames = async () => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-        copyToCacheDirectory: true,
-      });
-      if (result.canceled) return;
       setImportingNames(true);
-      const fileContent = await FileSystem.readAsStringAsync(result.assets[0].uri, { encoding: FileSystem.EncodingType.Base64 });
-      const wb = XLSX.read(fileContent, { type: 'base64' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
-      const namesData: Array<{ ticker: string; name: string }> = [];
+      const data = await importFromExcel();
+      if (!data) { setImportingNames(false); return; }
+      const namesData: Array<{ ticker: string; name: string; balanz_url_arg?: string | null; balanz_url_usa?: string | null }> = [];
       for (let i = 1; i < data.length; i++) {
         const row = data[i];
         if (!row || row.length < 2) continue;
         const ticker = row[0]?.toString().trim().toUpperCase();
         const name = row[1]?.toString().trim();
         if (!ticker || !name) continue;
-        namesData.push({ ticker, name });
+        const balanz_url_arg = row[2]?.toString().trim() || null;
+        const balanz_url_usa = row[3]?.toString().trim() || null;
+        namesData.push({ ticker, name, balanz_url_arg, balanz_url_usa });
       }
-      if (namesData.length === 0) { setImportingNames(false); showAlert(t('error'), 'No valid data found.'); return; }
+      if (namesData.length === 0) { setImportingNames(false); showAlert(t('error'), 'No valid data found. Columns: ticker | name | Balanz URL (ARG) | Balanz URL (USA)'); return; }
       const { successCount, failedCount, errors } = await tickerNameService.batchImportTickerNames(namesData);
       setImportingNames(false);
       if (errors.length > 0) {
@@ -664,37 +737,23 @@ export default function ConfigurationScreen() {
   const handleExportAccounts = async () => {
     try {
       setExportingAccounts(true);
-      const excelData = accounts.length > 0
+      const rows = accounts.length > 0
         ? accounts.map((a) => ({
             'email': a.email,
             'account_type': a.account_type,
             'new_affiliates': a.new_affiliates === null ? '' : a.new_affiliates ? 'TRUE' : 'FALSE',
           }))
         : [{ 'email': '', 'account_type': '', 'new_affiliates': '' }];
-      const ws = XLSX.utils.json_to_sheet(excelData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Accounts');
-      const buf = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-      const fileUri = FileSystem.documentDirectory + `accounts_${new Date().toISOString().split('T')[0]}.xlsx`;
-      await FileSystem.writeAsStringAsync(fileUri, buf, { encoding: FileSystem.EncodingType.Base64 });
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) { await Sharing.shareAsync(fileUri); } else { showAlert(t('success'), 'File saved'); }
+      await exportToExcel('Accounts', rows, `accounts_${new Date().toISOString().split('T')[0]}.xlsx`);
       setExportingAccounts(false);
     } catch { setExportingAccounts(false); showAlert(t('error'), 'Failed to export accounts.'); }
   };
 
   const handleBatchImportAccounts = async () => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-        copyToCacheDirectory: true,
-      });
-      if (result.canceled) return;
       setImportingAccounts(true);
-      const fileContent = await FileSystem.readAsStringAsync(result.assets[0].uri, { encoding: FileSystem.EncodingType.Base64 });
-      const wb = XLSX.read(fileContent, { type: 'base64' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      const data = await importFromExcel();
+      if (!data) { setImportingAccounts(false); return; }
       const accountsData: Array<{ email: string; account_type: AccountType }> = [];
       const newAffiliatesUpdates: Array<{ email: string; new_affiliates: boolean | null }> = [];
       const validTypes = userIsDev ? ['Affiliate', 'Admin', 'Free'] : ['Affiliate', 'Free'];
@@ -714,7 +773,7 @@ export default function ConfigurationScreen() {
           }
         }
       }
-      if (accountsData.length === 0) { setImportingAccounts(false); showAlert(t('error'), 'No valid data. Columns: email | account_type | new_affiliates (optional, Dev only)'); return; }
+      if (accountsData.length === 0) { setImportingAccounts(false); showAlert(t('error'), 'No valid data. Columns: email | account_type | new_affiliates (optional)'); return; }
       const { successCount, failedCount, errors } = await accountService.batchUpsertAccounts(accountsData);
       if (userIsDev && newAffiliatesUpdates.length > 0) {
         await accountService.batchUpdateNewAffiliates(newAffiliatesUpdates);
@@ -736,24 +795,12 @@ export default function ConfigurationScreen() {
       month: 'short', day: 'numeric', year: 'numeric',
     });
 
-  const formatPercent = (val: number | null) => {
-    if (val == null) return '-';
-    const sign = val >= 0 ? '+' : '';
-    return `${sign}${val.toFixed(2)}%`;
-  };
-
   const getYieldColor = (y: number | null) => {
     if (y == null) return colors.textSecondary;
     return y >= 0 ? colors.bullish : colors.bearish;
   };
 
   const getConditionColor = (cond: string) => cond === 'Current' ? colors.bullish : colors.textSecondary;
-
-  const getActionColor = (action: string | null) => {
-    if (action === 'Buy') return colors.bullish;
-    if (action === 'Sell') return colors.bearish;
-    return colors.textSecondary;
-  };
 
   const getProfileActionLabel = (a: string) => {
     switch (a) {
@@ -765,6 +812,12 @@ export default function ConfigurationScreen() {
       case 'Keep Out': return 'Keep Out';
       default: return t('actionRefrain');
     }
+  };
+
+  const getProfileActionColor = (a: string) => {
+    if (a === 'Buy' || a === 'Double') return colors.bullish;
+    if (a === 'Sell' || a === 'Close') return colors.bearish;
+    return colors.textSecondary;
   };
 
   const getAccountTypeBadgeColor = (type: AccountType) => {
@@ -782,62 +835,102 @@ export default function ConfigurationScreen() {
     label: string,
     value: ProfileAction,
     onChange: (v: ProfileAction) => void,
-    actions: ProfileAction[] = UPDATE_PROFILE_ACTIONS
+    actions: ProfileAction[] = UPDATE_PROFILE_ACTIONS,
+    locked: boolean = false
   ) => (
     <View style={styles.sliderGroup} key={label}>
       <Text style={[styles.label, { color: colors.textSecondary }]}>{label}</Text>
-      <View style={styles.sliderRow}>
-        {actions.map((opt) => (
-          <TouchableOpacity
-            key={opt}
-            style={[
-              styles.sliderOption,
-              { backgroundColor: colors.card, borderColor: colors.border },
-              value === opt && { backgroundColor: getActionColor(opt), borderColor: getActionColor(opt) },
-            ]}
-            onPress={() => onChange(opt)}
-          >
-            <Text style={[styles.sliderOptionText, { color: value === opt ? '#fff' : colors.textSecondary }]}>
-              {getProfileActionLabel(opt)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {locked ? (
+        <View style={[styles.lockedActionRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <MaterialIcons name="lock" size={14} color={colors.textTertiary} />
+          <Text style={[styles.lockedActionText, { color: colors.textTertiary }]}>
+            {getProfileActionLabel('Refrain')} ({language === 'es' ? 'bloqueado' : 'locked'})
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.sliderRow}>
+          {actions.map((opt) => (
+            <TouchableOpacity
+              key={opt}
+              style={[
+                styles.sliderOption,
+                { backgroundColor: colors.card, borderColor: colors.border },
+                value === opt && { backgroundColor: getProfileActionColor(opt), borderColor: getProfileActionColor(opt) },
+              ]}
+              onPress={() => onChange(opt)}
+            >
+              <Text style={[styles.sliderOptionText, { color: value === opt ? '#fff' : colors.textSecondary }]}>
+                {getProfileActionLabel(opt)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
     </View>
   );
 
-  // ─── Render helpers ───────────────────────────────────────────────────────
+  // ─── Alert list item (config view — admin/dev) ────────────────────────────
 
   const renderAlertItem = ({ item }: { item: AlertType }) => {
-    const yieldVal = calculateYield(item);
-    const elapsedDays = calculateElapsedDays(item);
+    const { hasARS, hasUSD } = getAlertMarkets(item);
     const isClosed = item.alert_condition === 'Closed';
-    const market = item.market ?? 'EEUU';
+    const arsYield = hasARS ? calculateYieldForMarket(item, 'ARS') : null;
+    const usdYield = hasUSD ? calculateYieldForMarket(item, 'USD') : null;
+    const displayYield = hasUSD ? usdYield : arsYield;
+    const stGoal = item.short_term_goal ?? item.three_months_goal;
+
+    const resolvedBalanzUrl: string | null = (() => {
+      const argUrl = item.balanz_url_arg?.trim() || null;
+      const usaUrl = item.balanz_url_usa?.trim() || null;
+      const legacyUrl = item.balanz_url?.trim() || null;
+      return argUrl || usaUrl || legacyUrl;
+    })();
+    const hasResolvedBalanzUrl = Boolean(resolvedBalanzUrl);
+    const hasAlertDetails = item.alert_details != null && item.alert_details.trim().length > 0;
+
+    const handleBalanzLink = async () => {
+      if (!resolvedBalanzUrl) return;
+      try {
+        const canOpen = await Linking.canOpenURL(resolvedBalanzUrl);
+        if (canOpen) await Linking.openURL(resolvedBalanzUrl);
+      } catch {}
+    };
+
+    const formatPercent = (val: number | null) => {
+      if (val == null) return null;
+      const sign = val >= 0 ? '+' : '';
+      return `${sign}${val.toFixed(2)}%`;
+    };
 
     return (
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+
+        {/* ── Header ── */}
         <View style={styles.cardHeader}>
-          <View style={{ flex: 1 }}>
-            <View style={styles.tickerRow}>
-              <Text style={[styles.ticker, { color: colors.text }]}>{item.ticker}</Text>
-              <View style={[styles.marketBadge, {
-                backgroundColor: market === 'ARG' ? `${colors.primary}20` : `${(colors.success ?? colors.primary)}15`,
-                borderColor: market === 'ARG' ? `${colors.primary}50` : `${(colors.success ?? colors.primary)}40`,
-              }]}>
-                <Text style={[styles.marketBadgeText, {
-                  color: market === 'ARG' ? colors.primary : (colors.success ?? colors.primary),
-                }]}>
-                  {market === 'ARG' ? 'AR$' : 'US$'}
-                </Text>
-              </View>
-            </View>
-            {item.ticker_name ? <Text style={[styles.tickerName, { color: colors.textSecondary }]}>{item.ticker_name}</Text> : null}
+          <View style={styles.tickerBlock}>
+            <Text style={[styles.ticker, { color: colors.text }]}>{item.ticker}</Text>
+            {item.ticker_name ? (
+              <Text style={[styles.tickerName, { color: colors.textSecondary }]}>{item.ticker_name}</Text>
+            ) : null}
+            <Text style={[styles.metaDate, { color: colors.textSecondary }]}>
+              {t('openingDate')}: {formatDate(item.opening_date)}
+            </Text>
+            {isClosed && item.closing_date ? (
+              <Text style={[styles.metaDate, { color: colors.textSecondary }]}>
+                {t('closingDate')}: {formatDate(item.closing_date)}
+              </Text>
+            ) : null}
           </View>
-          <View style={{ alignItems: 'flex-end', gap: 4 }}>
+          <View style={styles.headerRight}>
             <View style={[styles.miniChip, {
               backgroundColor: item.target_accounts === 'Subscribers' ? `${colors.primary}15` : `${colors.textSecondary}12`,
               borderColor: item.target_accounts === 'Subscribers' ? `${colors.primary}40` : colors.border,
             }]}>
+              <MaterialIcons
+                name={item.target_accounts === 'Subscribers' ? 'star' : 'public'}
+                size={11}
+                color={item.target_accounts === 'Subscribers' ? colors.primary : colors.textSecondary}
+              />
               <Text style={[styles.miniChipText, { color: item.target_accounts === 'Subscribers' ? colors.primary : colors.textSecondary }]}>
                 {item.target_accounts === 'Subscribers' ? t('targetSubscribers') : t('targetFreeAccounts')}
               </Text>
@@ -851,66 +944,166 @@ export default function ConfigurationScreen() {
           </View>
         </View>
 
-        <View style={[styles.grid, { borderColor: colors.border }]}>
-          {item.action && (
-            <View style={styles.gridCell}>
-              <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('action')}</Text>
-              <Text style={[styles.gridValue, { color: getActionColor(item.action) }]}>{item.action === 'Buy' ? t('actionBuy') : t('actionSell')}</Text>
+        {/* ── ARS Price Block ── */}
+        {hasARS && (
+          <View style={[styles.priceBlock, { borderTopColor: colors.border }]}>
+            <View style={styles.priceRow}>
+              <View style={styles.priceCell}>
+                <Text style={[styles.priceLabel, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Precio de Entrada' : 'Entry Price'}
+                </Text>
+                <Text style={[styles.priceValue, { color: colors.text }]}>
+                  {formatPriceARS(item.entry_price_ars ?? (item.market === 'ARG' ? item.entry_price : null))}
+                </Text>
+              </View>
+              <View style={styles.priceCell}>
+                <Text style={[styles.priceLabel, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Re-Entrada' : 'Re-Entry Price'}
+                </Text>
+                <Text style={[styles.priceValue, { color: colors.text }]}>
+                  {formatPriceARS(item.re_entry_price_ars ?? (item.market === 'ARG' ? item.re_entry_price : null))}
+                </Text>
+              </View>
+              <View style={styles.priceCell}>
+                <Text style={[styles.priceLabel, { color: colors.textSecondary }]}>
+                  {isClosed ? (language === 'es' ? 'Precio Cierre' : 'Closing Price') : (language === 'es' ? 'Precio Actual' : 'Current Price')}
+                </Text>
+                <Text style={[styles.priceValue, { color: colors.text }]}>
+                  {isClosed
+                    ? formatPriceARS(item.closing_price_ars ?? (item.market === 'ARG' ? item.closing_price : null))
+                    : formatPriceARS(item.current_price_ars ?? (item.market === 'ARG' ? item.current_price : null))}
+                </Text>
+              </View>
             </View>
-          )}
-          {item.entry_price != null && (
-            <View style={styles.gridCell}>
-              <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('entryPrice')}</Text>
-              <Text style={[styles.gridValue, { color: colors.text }]}>{formatPrice(item.entry_price, market)}</Text>
-            </View>
-          )}
-          {item.re_entry_price != null && (
-            <View style={styles.gridCell}>
-              <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('reEntryPrice')}</Text>
-              <Text style={[styles.gridValue, { color: colors.text }]}>{formatPrice(item.re_entry_price, market)}</Text>
-            </View>
-          )}
-          {!isClosed && item.current_price != null && (
-            <View style={styles.gridCell}>
-              <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('currentPrice')}</Text>
-              <Text style={[styles.gridValue, { color: colors.text }]}>{formatPrice(item.current_price, market)}</Text>
-            </View>
-          )}
-          {isClosed && item.closing_price != null && (
-            <View style={styles.gridCell}>
-              <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('closingPrice')}</Text>
-              <Text style={[styles.gridValue, { color: colors.text }]}>{formatPrice(item.closing_price, market)}</Text>
-            </View>
-          )}
-          {item.three_months_goal != null && (
-            <View style={styles.gridCell}>
-              <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('threeMonthsGoal')}</Text>
-              <Text style={[styles.gridValue, { color: colors.primary }]}>{item.three_months_goal.toFixed(1)}%</Text>
-            </View>
-          )}
-          {yieldVal != null && (
-            <View style={styles.gridCell}>
-              <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('yieldLabel')}</Text>
-              <Text style={[styles.gridValue, { color: getYieldColor(yieldVal) }]}>{formatPercent(yieldVal)}</Text>
-            </View>
-          )}
-          <View style={styles.gridCell}>
-            <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('elapsedTime')}</Text>
-            <Text style={[styles.gridValue, { color: colors.text }]}>{formatElapsed(elapsedDays)}</Text>
           </View>
-          <View style={styles.gridCell}>
-            <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('openingDate')}</Text>
-            <Text style={[styles.gridValue, { color: colors.text }]}>{formatDate(item.opening_date)}</Text>
-          </View>
-          {isClosed && item.closing_date && (
-            <View style={styles.gridCell}>
-              <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('closingDate')}</Text>
-              <Text style={[styles.gridValue, { color: colors.text }]}>{formatDate(item.closing_date)}</Text>
+        )}
+
+        {/* ── USD Price Block ── */}
+        {hasUSD && (
+          <View style={[styles.priceBlock, { borderTopColor: colors.border }]}>
+            <View style={styles.priceRow}>
+              <View style={styles.priceCell}>
+                <Text style={[styles.priceLabel, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Precio de Entrada' : 'Entry Price'}
+                </Text>
+                <Text style={[styles.priceValue, { color: colors.text }]}>
+                  {formatPriceUSD(item.entry_price_usd ?? (item.market === 'EEUU' ? item.entry_price : null))}
+                </Text>
+              </View>
+              <View style={styles.priceCell}>
+                <Text style={[styles.priceLabel, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Re-Entrada' : 'Re-Entry Price'}
+                </Text>
+                <Text style={[styles.priceValue, { color: colors.text }]}>
+                  {formatPriceUSD(item.re_entry_price_usd ?? (item.market === 'EEUU' ? item.re_entry_price : null))}
+                </Text>
+              </View>
+              <View style={styles.priceCell}>
+                <Text style={[styles.priceLabel, { color: colors.textSecondary }]}>
+                  {isClosed ? (language === 'es' ? 'Precio Cierre' : 'Closing Price') : (language === 'es' ? 'Precio Actual' : 'Current Price')}
+                </Text>
+                <Text style={[styles.priceValue, { color: colors.text }]}>
+                  {isClosed
+                    ? formatPriceUSD(item.closing_price_usd ?? (item.market === 'EEUU' ? item.closing_price : null))
+                    : formatPriceUSD(item.current_price_usd ?? (item.market === 'EEUU' ? item.current_price : null))}
+                </Text>
+              </View>
             </View>
-          )}
+          </View>
+        )}
+
+        {/* ── Yield / Goals row ── */}
+        <View style={[styles.metricsRow, { borderTopColor: colors.border }]}>
+          <View style={styles.metricCell}>
+            <Text style={[styles.priceLabel, { color: colors.textSecondary }]}>
+              {language === 'es' ? 'Rendimiento' : 'Current Yield'}
+            </Text>
+            <Text style={[styles.priceValue, { color: getYieldColor(displayYield) }]}>
+              {formatPercent(displayYield) ?? '-'}
+            </Text>
+          </View>
+          <View style={styles.metricCell}>
+            <Text style={[styles.priceLabel, { color: colors.textSecondary }]}>
+              {language === 'es' ? 'Meta Corto Plazo' : 'Short-Term Goal'}
+            </Text>
+            <Text style={[styles.priceValue, { color: colors.primary }]}>
+              {stGoal != null ? `${Math.round(stGoal)}%` : '-'}
+            </Text>
+          </View>
+          <View style={styles.metricCell}>
+            <Text style={[styles.priceLabel, { color: colors.textSecondary }]}>
+              {language === 'es' ? 'Meta Largo Plazo' : 'Long-Term Goal'}
+            </Text>
+            <Text style={[styles.priceValue, { color: colors.primary }]}>
+              {item.long_term_goal != null ? `${Math.round(item.long_term_goal)}%` : '-'}
+            </Text>
+          </View>
         </View>
 
-        {/* Responsive action buttons — fill horizontal space */}
+        {/* ── Profile actions row (full labels, matching AlertCard) ── */}
+        <View style={[styles.profileActionsRow, { borderTopColor: colors.border }]}>
+          {[
+            { key: 'action_conservative', label: language === 'es' ? 'Conserv.' : 'Conservative' },
+            { key: 'action_moderate', label: language === 'es' ? 'Moderado' : 'Moderate' },
+            { key: 'action_aggressive', label: language === 'es' ? 'Agresivo' : 'Aggressive' },
+            { key: 'action_ultra_aggressive', label: language === 'es' ? 'Ultra-Agres.' : 'Ultra-Aggr.' },
+          ].map(({ key, label }) => {
+            const val = (item[key as keyof AlertType] as string) ?? 'Refrain';
+            return (
+              <View key={key} style={styles.profileActionCell}>
+                <Text style={[styles.profileActionLabel, { color: colors.textSecondary }]}>{label}</Text>
+                <Text style={[styles.profileActionValue, { color: getProfileActionColor(val) }]}>
+                  {getProfileActionLabel(val)}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+
+        {/* ── Bottom bar: Balanz + Alert Details (matching AlertCard) ── */}
+        <View style={[styles.bottomBar, { borderTopColor: colors.border }]}>
+          <View style={styles.bottomBarItem}>
+            <Text style={[styles.bottomBarLabel, { color: colors.textSecondary }]}>
+              {language === 'es' ? 'Operar con Balanz' : 'Trade with Balanz'}
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.bottomBarBtn,
+                {
+                  backgroundColor: hasResolvedBalanzUrl ? `${colors.primary}15` : `${colors.border}20`,
+                  borderColor: hasResolvedBalanzUrl ? `${colors.primary}40` : colors.border,
+                },
+              ]}
+              onPress={hasResolvedBalanzUrl ? handleBalanzLink : undefined}
+              disabled={!hasResolvedBalanzUrl}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={{ fontSize: 22 }}>🔗</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={[styles.bottomBarDivider, { backgroundColor: colors.border }]} />
+          <View style={styles.bottomBarItem}>
+            <Text style={[styles.bottomBarLabel, { color: colors.textSecondary }]}>
+              {language === 'es' ? 'Detalles' : 'Alert Details'}
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.bottomBarBtn,
+                {
+                  backgroundColor: hasAlertDetails ? `${colors.primary}15` : `${colors.border}20`,
+                  borderColor: hasAlertDetails ? `${colors.primary}40` : colors.border,
+                },
+              ]}
+              onPress={hasAlertDetails ? () => { setDetailsAlert(item); setShowDetailsModal(true); } : undefined}
+              disabled={!hasAlertDetails}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={{ fontSize: 22 }}>✉️</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ── Action buttons ── */}
         <View style={[styles.cardActions, { borderTopColor: colors.border }]}>
           {!isClosed && (
             <TouchableOpacity
@@ -957,7 +1150,16 @@ export default function ConfigurationScreen() {
           <Text style={[styles.tickerName, { color: colors.textSecondary }]}>{item.name}</Text>
         </View>
         <View style={{ flexDirection: 'row', gap: spacing.md }}>
-          <TouchableOpacity onPress={() => { setEditingName(item); setNewNameValue(item.name); setShowEditNameModal(true); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <TouchableOpacity
+            onPress={() => {
+              setEditingName(item);
+              setNewNameValue(item.name);
+              setNewNameBalanzUrlArg(item.balanz_url_arg ?? '');
+              setNewNameBalanzUrlUsa(item.balanz_url_usa ?? '');
+              setShowEditNameModal(true);
+            }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <MaterialIcons name="edit" size={20} color={colors.primary} />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => handleDeleteName(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -965,6 +1167,30 @@ export default function ConfigurationScreen() {
           </TouchableOpacity>
         </View>
       </View>
+      {(item.balanz_url_arg || item.balanz_url_usa) && (
+        <View style={[styles.nameUrlRow, { borderTopColor: colors.border }]}>
+          {item.balanz_url_arg ? (
+            <TouchableOpacity
+              style={[styles.nameUrlChip, { backgroundColor: `${colors.primary}12`, borderColor: `${colors.primary}30` }]}
+              onPress={() => Linking.openURL(item.balanz_url_arg!)}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            >
+              <MaterialIcons name="link" size={13} color={colors.primary} />
+              <Text style={[styles.nameUrlChipText, { color: colors.primary }]}>Balanz AR$</Text>
+            </TouchableOpacity>
+          ) : null}
+          {item.balanz_url_usa ? (
+            <TouchableOpacity
+              style={[styles.nameUrlChip, { backgroundColor: `${colors.primary}12`, borderColor: `${colors.primary}30` }]}
+              onPress={() => Linking.openURL(item.balanz_url_usa!)}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            >
+              <MaterialIcons name="link" size={13} color={colors.primary} />
+              <Text style={[styles.nameUrlChipText, { color: colors.primary }]}>Balanz US$</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      )}
     </View>
   );
 
@@ -1063,9 +1289,6 @@ export default function ConfigurationScreen() {
         <View style={styles.headerActions}>
           {activeTab === 'alerts' && (
             <>
-              <TouchableOpacity onPress={handleImportAlerts} style={styles.headerActionButton} disabled={importingAlerts}>
-                {importingAlerts ? <ActivityIndicator size="small" color={colors.primary} /> : <MaterialIcons name="upload-file" size={24} color={colors.primary} />}
-              </TouchableOpacity>
               <TouchableOpacity onPress={handleExportAlerts} style={styles.headerActionButton} disabled={exportingAlerts}>
                 {exportingAlerts ? <ActivityIndicator size="small" color={colors.primary} /> : <MaterialIcons name="file-download" size={24} color={colors.primary} />}
               </TouchableOpacity>
@@ -1137,16 +1360,9 @@ export default function ConfigurationScreen() {
       {activeTab === 'alerts' && (
         <View style={[styles.searchBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <MaterialIcons name="search" size={20} color={colors.textSecondary} />
-          <TextInput
-            style={[styles.searchInput, { color: colors.text }]}
-            value={alertSearch}
-            onChangeText={setAlertSearch}
-            placeholder={language === 'es' ? 'Buscar ticker...' : 'Search ticker...'}
-            placeholderTextColor={colors.textTertiary}
-            autoCapitalize="none"
-            autoCorrect={false}
-            clearButtonMode="while-editing"
-          />
+          <TextInput style={[styles.searchInput, { color: colors.text }]} value={alertSearch} onChangeText={setAlertSearch}
+            placeholder={language === 'es' ? 'Buscar ticker...' : 'Search ticker...'} placeholderTextColor={colors.textTertiary}
+            autoCapitalize="none" autoCorrect={false} clearButtonMode="while-editing" />
           {alertSearch.length > 0 && (
             <TouchableOpacity onPress={() => setAlertSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <MaterialIcons name="close" size={18} color={colors.textSecondary} />
@@ -1157,16 +1373,9 @@ export default function ConfigurationScreen() {
       {activeTab === 'names' && userIsDev && (
         <View style={[styles.searchBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <MaterialIcons name="search" size={20} color={colors.textSecondary} />
-          <TextInput
-            style={[styles.searchInput, { color: colors.text }]}
-            value={namesSearch}
-            onChangeText={setNamesSearch}
-            placeholder={language === 'es' ? 'Buscar...' : 'Search...'}
-            placeholderTextColor={colors.textTertiary}
-            autoCapitalize="none"
-            autoCorrect={false}
-            clearButtonMode="while-editing"
-          />
+          <TextInput style={[styles.searchInput, { color: colors.text }]} value={namesSearch} onChangeText={setNamesSearch}
+            placeholder={language === 'es' ? 'Buscar...' : 'Search...'} placeholderTextColor={colors.textTertiary}
+            autoCapitalize="none" autoCorrect={false} clearButtonMode="while-editing" />
           {namesSearch.length > 0 && (
             <TouchableOpacity onPress={() => setNamesSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <MaterialIcons name="close" size={18} color={colors.textSecondary} />
@@ -1177,16 +1386,9 @@ export default function ConfigurationScreen() {
       {activeTab === 'accounts' && (
         <View style={[styles.searchBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <MaterialIcons name="search" size={20} color={colors.textSecondary} />
-          <TextInput
-            style={[styles.searchInput, { color: colors.text }]}
-            value={accountSearch}
-            onChangeText={setAccountSearch}
-            placeholder={language === 'es' ? 'Buscar...' : 'Search...'}
-            placeholderTextColor={colors.textTertiary}
-            autoCapitalize="none"
-            autoCorrect={false}
-            clearButtonMode="while-editing"
-          />
+          <TextInput style={[styles.searchInput, { color: colors.text }]} value={accountSearch} onChangeText={setAccountSearch}
+            placeholder={language === 'es' ? 'Buscar...' : 'Search...'} placeholderTextColor={colors.textTertiary}
+            autoCapitalize="none" autoCorrect={false} clearButtonMode="while-editing" />
           {accountSearch.length > 0 && (
             <TouchableOpacity onPress={() => setAccountSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <MaterialIcons name="close" size={18} color={colors.textSecondary} />
@@ -1241,14 +1443,9 @@ export default function ConfigurationScreen() {
               <Text style={[styles.emptyTitle, { color: colors.text }]}>{t('noTickerNames')}</Text>
             </ScrollView>
           ) : (
-            <FlatList
-              data={filtered}
-              renderItem={renderNameItem}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />}
-            />
+            <FlatList data={filtered} renderItem={renderNameItem} keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />} />
           );
         })()
       )}
@@ -1268,56 +1465,62 @@ export default function ConfigurationScreen() {
               <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>{t('addAccountsToStart')}</Text>
             </ScrollView>
           ) : (
-            <FlatList
-              data={filtered}
-              renderItem={renderAccountItem}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />}
-            />
+            <FlatList data={filtered} renderItem={renderAccountItem} keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />} />
           );
         })()
       )}
 
-      {/* ── Create Alert Modal ── */}
+      {/* ══════════════════════════════════════════════════════════════════════
+          CREATE ALERT MODAL — 14-field new unified format
+          ══════════════════════════════════════════════════════════════════ */}
       <Modal visible={showCreateModal} transparent animationType="slide" onRequestClose={() => { setShowCreateModal(false); resetCreateForm(); }}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, { backgroundColor: colors.surface }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>{t('addNewAlert')}</Text>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+              {/* 1. Ticker */}
               <View style={styles.inputGroup}>
                 <Text style={[styles.label, { color: colors.textSecondary }]}>{t('ticker')} *</Text>
-                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]} value={newTicker} onChangeText={setNewTicker} placeholder="e.g., AAPL" placeholderTextColor={colors.textTertiary} autoCapitalize="characters" autoCorrect={false} />
+                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newTicker} onChangeText={setNewTicker} placeholder="e.g., AAPL"
+                  placeholderTextColor={colors.textTertiary} autoCapitalize="characters" autoCorrect={false} />
               </View>
 
-              {/* Market selector */}
+              {/* 2. Term */}
               <View style={styles.inputGroup}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>{t('market')} *</Text>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Plazo *' : 'Term *'}
+                </Text>
                 <View style={styles.sliderRow}>
-                  {(['EEUU', 'ARG'] as AlertMarket[]).map((opt) => (
+                  {(['Short', 'Long'] as AlertTerm[]).map((opt) => (
                     <TouchableOpacity
                       key={opt}
-                      style={[styles.sliderOption, { backgroundColor: colors.card, borderColor: colors.border }, newMarket === opt && { backgroundColor: colors.primary, borderColor: colors.primary }]}
-                      onPress={() => setNewMarket(opt)}
+                      style={[
+                        styles.sliderOption,
+                        { backgroundColor: colors.card, borderColor: colors.border },
+                        newTerm === opt && { backgroundColor: colors.primary, borderColor: colors.primary },
+                      ]}
+                      onPress={() => setNewTerm(opt)}
                     >
-                      <Text style={[styles.sliderOptionText, { color: newMarket === opt ? '#fff' : colors.textSecondary }]}>
-                        {opt === 'EEUU' ? 'EEUU (US$)' : 'ARG (AR$)'}
+                      <Text style={[styles.sliderOptionText, { color: newTerm === opt ? '#fff' : colors.textSecondary }]}>
+                        {opt === 'Short' ? (language === 'es' ? 'Corto' : 'Short') : (language === 'es' ? 'Largo' : 'Long')}
                       </Text>
                     </TouchableOpacity>
                   ))}
                 </View>
               </View>
 
+              {/* 3. Target Accounts */}
               <View style={styles.inputGroup}>
                 <Text style={[styles.label, { color: colors.textSecondary }]}>{t('targetAccounts')} *</Text>
                 <View style={styles.sliderRow}>
                   {(['Subscribers', 'Free-Accounts'] as TargetAccounts[]).map((opt) => (
-                    <TouchableOpacity
-                      key={opt}
+                    <TouchableOpacity key={opt}
                       style={[styles.sliderOption, { backgroundColor: colors.card, borderColor: colors.border }, newTargetAccounts === opt && { backgroundColor: colors.primary, borderColor: colors.primary }]}
-                      onPress={() => setNewTargetAccounts(opt)}
-                    >
+                      onPress={() => setNewTargetAccounts(opt)}>
                       <Text style={[styles.sliderOptionText, { color: newTargetAccounts === opt ? '#fff' : colors.textSecondary }]}>
                         {opt === 'Subscribers' ? t('targetSubscribers') : t('targetFreeAccounts')}
                       </Text>
@@ -1325,43 +1528,117 @@ export default function ConfigurationScreen() {
                   ))}
                 </View>
               </View>
+
+              {/* 3-6. Profile actions */}
+              {renderProfileActionSlider(`${language === 'es' ? 'Conservador' : 'Conservative'} *`, newActionConservative, setNewActionConservative, CREATE_PROFILE_ACTIONS)}
+              {renderProfileActionSlider(`${language === 'es' ? 'Moderado' : 'Moderate'} *`, newActionModerate, setNewActionModerate, CREATE_PROFILE_ACTIONS)}
+              {renderProfileActionSlider(`${language === 'es' ? 'Agresivo' : 'Aggressive'} *`, newActionAggressive, setNewActionAggressive, CREATE_PROFILE_ACTIONS)}
+              {renderProfileActionSlider(`Ultra-${language === 'es' ? 'Agresivo' : 'Aggressive'} *`, newActionUltraAggressive, setNewActionUltraAggressive, CREATE_PROFILE_ACTIONS)}
+
+              {/* 7. Entry Price ARS — mandatory if no USD */}
               <View style={styles.inputGroup}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>{t('action')}</Text>
-                <View style={styles.sliderRow}>
-                  {(['Buy', 'Sell'] as AlertAction[]).map((opt) => (
-                    <TouchableOpacity
-                      key={opt}
-                      style={[styles.sliderOption, { backgroundColor: colors.card, borderColor: colors.border }, newAction === opt && { backgroundColor: getActionColor(opt), borderColor: getActionColor(opt) }]}
-                      onPress={() => setNewAction(newAction === opt ? null : opt)}
-                    >
-                      <Text style={[styles.sliderOptionText, { color: newAction === opt ? '#fff' : colors.textSecondary }]}>
-                        {opt === 'Buy' ? t('actionBuy') : t('actionSell')}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Precio de Entrada (AR$)' : 'Entry Price (AR$)'}
+                  {newEntryPriceUSD ? '' : ' *'}
+                </Text>
+                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newEntryPriceARS} onChangeText={setNewEntryPriceARS} placeholder="e.g., 52600"
+                  placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
               </View>
+
+              {/* 8. Re-Entry Price ARS — optional */}
               <View style={styles.inputGroup}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>{t('entryPrice')}</Text>
-                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]} value={newEntryPrice} onChangeText={setNewEntryPrice} placeholder="e.g., 150.00" placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Precio Re-Entrada (AR$)' : 'Re-Entry Price (AR$)'}
+                </Text>
+                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newReEntryPriceARS} onChangeText={setNewReEntryPriceARS} placeholder="e.g., 50600"
+                  placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
               </View>
+
+              {/* 9. Entry Price USD — mandatory if no ARS */}
               <View style={styles.inputGroup}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>{t('reEntryPrice')}</Text>
-                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]} value={newReEntryPrice} onChangeText={setNewReEntryPrice} placeholder="e.g., 140.00" placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Precio de Entrada (US$)' : 'Entry Price (US$)'}
+                  {newEntryPriceARS ? '' : ' *'}
+                </Text>
+                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newEntryPriceUSD} onChangeText={setNewEntryPriceUSD} placeholder="e.g., 173.00"
+                  placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
               </View>
+
+              {/* 10. Re-Entry Price USD — optional */}
               <View style={styles.inputGroup}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>{t('threeMonthsGoal')} (%)</Text>
-                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]} value={newThreeMonthsGoal} onChangeText={setNewThreeMonthsGoal} placeholder="e.g., 15" placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Precio Re-Entrada (US$)' : 'Re-Entry Price (US$)'}
+                </Text>
+                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newReEntryPriceUSD} onChangeText={setNewReEntryPriceUSD} placeholder="e.g., 153.00"
+                  placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
               </View>
-              {renderProfileActionSlider(t('actionConservative') + ' *', newActionConservative, setNewActionConservative, CREATE_PROFILE_ACTIONS)}
-              {renderProfileActionSlider(t('actionModerate') + ' *', newActionModerate, setNewActionModerate, CREATE_PROFILE_ACTIONS)}
-              {renderProfileActionSlider(t('actionRisky') + ' *', newActionAggressive, setNewActionAggressive, CREATE_PROFILE_ACTIONS)}
+
+              {/* 11. Short-Term Goal */}
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Objetivo Corto Plazo (%)' : 'Short-Term Goal (%)'}
+                </Text>
+                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newShortTermGoal} onChangeText={setNewShortTermGoal} placeholder="e.g., 15"
+                  placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
+              </View>
+
+              {/* 12. Long-Term Goal — optional */}
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Objetivo Largo Plazo (%)' : 'Long-Term Goal (%)'}
+                </Text>
+                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newLongTermGoal} onChangeText={setNewLongTermGoal} placeholder="e.g., 45"
+                  placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
+              </View>
+
+              {/* 14. Alert Details (ES) — optional, max 1000 chars, emoji support */}
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Detalles de la Alerta (ES)' : 'Alert Details (ES)'} ({newAlertDetails.length}/1000)
+                </Text>
+                <TextInput
+                  style={[styles.textArea, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newAlertDetails}
+                  onChangeText={(t) => setNewAlertDetails(t.slice(0, 1000))}
+                  placeholder={language === 'es' ? 'Descripción detallada, análisis, emojis...' : 'Detailed description, analysis, emojis...'}
+                  placeholderTextColor={colors.textTertiary}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              {/* 14b. Alert Details (EN) — optional, max 1000 chars, emoji support */}
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Detalles de la Alerta (EN)' : 'Alert Details (EN)'} ({newAlertDetailEn.length}/1000)
+                </Text>
+                <TextInput
+                  style={[styles.textArea, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newAlertDetailEn}
+                  onChangeText={(t) => setNewAlertDetailEn(t.slice(0, 1000))}
+                  placeholder="Detailed description, analysis, emojis..."
+                  placeholderTextColor={colors.textTertiary}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+              </View>
+
             </ScrollView>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => { setShowCreateModal(false); resetCreateForm(); }} disabled={creating}>
+              <TouchableOpacity style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => { setShowCreateModal(false); resetCreateForm(); }} disabled={creating}>
                 <Text style={[styles.buttonSecondaryText, { color: colors.text }]}>{t('cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.button, styles.buttonPrimary, creating && styles.buttonDisabled]} onPress={handleCreateAlert} disabled={creating}>
+              <TouchableOpacity style={[styles.button, styles.buttonPrimary, creating && styles.buttonDisabled]}
+                onPress={handleCreateAlert} disabled={creating}>
                 {creating ? <ActivityIndicator color={colors.background} size="small" /> : <Text style={[styles.buttonPrimaryText, { color: colors.background }]}>{t('add')}</Text>}
               </TouchableOpacity>
             </View>
@@ -1369,29 +1646,100 @@ export default function ConfigurationScreen() {
         </View>
       </Modal>
 
-      {/* ── Update Alert Modal ── */}
+      {/* ══════════════════════════════════════════════════════════════════════
+          UPDATE ALERT MODAL
+          ══════════════════════════════════════════════════════════════════ */}
       <Modal visible={showUpdateModal} transparent animationType="slide" onRequestClose={() => { setShowUpdateModal(false); setEditingAlert(null); }}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, { backgroundColor: colors.surface }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>{t('updateAlert')}: {editingAlert?.ticker}</Text>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+              {/* Current prices based on alert markets */}
+              {editingAlert && getAlertMarkets(editingAlert).hasARS && (
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: colors.textSecondary }]}>
+                    {language === 'es' ? 'Precio Actual (AR$)' : 'Current Price (AR$)'}
+                  </Text>
+                  <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                    value={editCurrentPriceARS} onChangeText={setEditCurrentPriceARS} placeholder="e.g., 55600"
+                    placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
+                </View>
+              )}
+              {editingAlert && getAlertMarkets(editingAlert).hasUSD && (
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: colors.textSecondary }]}>
+                    {language === 'es' ? 'Precio Actual (US$)' : 'Current Price (US$)'}
+                  </Text>
+                  <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                    value={editCurrentPriceUSD} onChangeText={setEditCurrentPriceUSD} placeholder="e.g., 183.00"
+                    placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
+                </View>
+              )}
+
               <View style={styles.inputGroup}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>{t('currentPrice')}</Text>
-                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]} value={editCurrentPrice} onChangeText={setEditCurrentPrice} placeholder="e.g., 160.00" placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Objetivo Corto Plazo (%)' : 'Short-Term Goal (%)'}
+                </Text>
+                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={editShortTermGoal} onChangeText={setEditShortTermGoal} placeholder="e.g., 15"
+                  placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
               </View>
+
               <View style={styles.inputGroup}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>{t('threeMonthsGoal')} (%)</Text>
-                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]} value={editThreeMonthsGoal} onChangeText={setEditThreeMonthsGoal} placeholder="e.g., 15" placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Objetivo Largo Plazo (%)' : 'Long-Term Goal (%)'}
+                </Text>
+                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={editLongTermGoal} onChangeText={setEditLongTermGoal} placeholder="e.g., 45"
+                  placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
               </View>
-              {renderProfileActionSlider(t('actionConservative'), editActionConservative, setEditActionConservative)}
-              {renderProfileActionSlider(t('actionModerate'), editActionModerate, setEditActionModerate)}
-              {renderProfileActionSlider(t('actionRisky'), editActionAggressive, setEditActionAggressive)}
+
+              {renderProfileActionSlider(language === 'es' ? 'Conservador' : 'Conservative', editActionConservative, setEditActionConservative, UPDATE_PROFILE_ACTIONS, editingAlert?.action_conservative === 'Refrain')}
+              {renderProfileActionSlider(language === 'es' ? 'Moderado' : 'Moderate', editActionModerate, setEditActionModerate, UPDATE_PROFILE_ACTIONS, editingAlert?.action_moderate === 'Refrain')}
+              {renderProfileActionSlider(language === 'es' ? 'Agresivo' : 'Aggressive', editActionAggressive, setEditActionAggressive, UPDATE_PROFILE_ACTIONS, editingAlert?.action_aggressive === 'Refrain')}
+              {renderProfileActionSlider(`Ultra-${language === 'es' ? 'Agresivo' : 'Aggressive'}`, editActionUltraAggressive, setEditActionUltraAggressive, UPDATE_PROFILE_ACTIONS, (editingAlert?.action_ultra_aggressive ?? 'Refrain') === 'Refrain')}
+
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Detalles de la Alerta (ES)' : 'Alert Details (ES)'} ({editAlertDetails.length}/1000)
+                </Text>
+                <TextInput
+                  style={[styles.textArea, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={editAlertDetails}
+                  onChangeText={(t) => setEditAlertDetails(t.slice(0, 1000))}
+                  placeholder={language === 'es' ? 'Descripción, análisis, emojis...' : 'Description, analysis, emojis...'}
+                  placeholderTextColor={colors.textTertiary}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Detalles de la Alerta (EN)' : 'Alert Details (EN)'} ({editAlertDetailEn.length}/1000)
+                </Text>
+                <TextInput
+                  style={[styles.textArea, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={editAlertDetailEn}
+                  onChangeText={(t) => setEditAlertDetailEn(t.slice(0, 1000))}
+                  placeholder="Description, analysis, emojis..."
+                  placeholderTextColor={colors.textTertiary}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+              </View>
+
             </ScrollView>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => { setShowUpdateModal(false); setEditingAlert(null); }} disabled={updatingAlert}>
+              <TouchableOpacity style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => { setShowUpdateModal(false); setEditingAlert(null); }} disabled={updatingAlert}>
                 <Text style={[styles.buttonSecondaryText, { color: colors.text }]}>{t('cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.button, styles.buttonPrimary, updatingAlert && styles.buttonDisabled]} onPress={handleUpdateAlert} disabled={updatingAlert}>
+              <TouchableOpacity style={[styles.button, styles.buttonPrimary, updatingAlert && styles.buttonDisabled]}
+                onPress={handleUpdateAlert} disabled={updatingAlert}>
                 {updatingAlert ? <ActivityIndicator color={colors.background} size="small" /> : <Text style={[styles.buttonPrimaryText, { color: colors.background }]}>{t('update')}</Text>}
               </TouchableOpacity>
             </View>
@@ -1399,23 +1747,72 @@ export default function ConfigurationScreen() {
         </View>
       </Modal>
 
-      {/* ── Close Alert Modal ── */}
-      <Modal visible={showCloseModal} transparent animationType="slide" onRequestClose={() => { setShowCloseModal(false); setClosingAlertTarget(null); setClosePrice(''); }}>
+      {/* ══════════════════════════════════════════════════════════════════════
+          CLOSE ALERT MODAL
+          ══════════════════════════════════════════════════════════════════ */}
+      <Modal visible={showCloseModal} transparent animationType="slide" onRequestClose={() => { setShowCloseModal(false); setClosingAlertTarget(null); setClosePriceARS(''); setClosePriceUSD(''); }}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, { backgroundColor: colors.surface }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>{t('closeAlert')}: {closingAlertTarget?.ticker}</Text>
-            <View style={styles.inputGroup}>
-              <Text style={[styles.label, { color: colors.textSecondary }]}>{t('closingPrice')}</Text>
-              <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]} value={closePrice} onChangeText={setClosePrice} placeholder="e.g., 175.00" placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
-            </View>
+            {closingAlertTarget && getAlertMarkets(closingAlertTarget).hasARS && (
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Precio de Cierre (AR$)' : 'Closing Price (AR$)'}
+                </Text>
+                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={closePriceARS} onChangeText={setClosePriceARS} placeholder="e.g., 55600"
+                  placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
+              </View>
+            )}
+            {closingAlertTarget && getAlertMarkets(closingAlertTarget).hasUSD && (
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Precio de Cierre (US$)' : 'Closing Price (US$)'}
+                </Text>
+                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={closePriceUSD} onChangeText={setClosePriceUSD} placeholder="e.g., 183.00"
+                  placeholderTextColor={colors.textTertiary} keyboardType="decimal-pad" />
+              </View>
+            )}
             <View style={styles.modalActions}>
-              <TouchableOpacity style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => { setShowCloseModal(false); setClosingAlertTarget(null); setClosePrice(''); }} disabled={closingAlert}>
+              <TouchableOpacity style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => { setShowCloseModal(false); setClosingAlertTarget(null); setClosePriceARS(''); setClosePriceUSD(''); }} disabled={closingAlert}>
                 <Text style={[styles.buttonSecondaryText, { color: colors.text }]}>{t('cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.button, { backgroundColor: colors.warning ?? '#f59e0b' }, closingAlert && styles.buttonDisabled]} onPress={handleCloseAlert} disabled={closingAlert}>
+              <TouchableOpacity style={[styles.button, { backgroundColor: colors.warning ?? '#f59e0b' }, closingAlert && styles.buttonDisabled]}
+                onPress={handleCloseAlert} disabled={closingAlert}>
                 {closingAlert ? <ActivityIndicator color="#fff" size="small" /> : <Text style={[styles.buttonPrimaryText, { color: '#fff' }]}>{t('closeAlert')}</Text>}
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Alert Details Modal (Config cards) ── */}
+      <Modal
+        visible={showDetailsModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => { setShowDetailsModal(false); setDetailsAlert(null); }}
+      >
+        <View style={styles.detailsModalOverlay}>
+          <View style={[styles.detailsModalSheet, { backgroundColor: colors.surface }]}>
+            <View style={styles.detailsModalHeader}>
+              <Text style={[styles.detailsModalTitle, { color: colors.text }]}>
+                {detailsAlert?.ticker}{detailsAlert?.ticker_name ? ` — ${detailsAlert.ticker_name}` : ''}
+              </Text>
+              <TouchableOpacity
+                onPress={() => { setShowDetailsModal(false); setDetailsAlert(null); }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <MaterialIcons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={[styles.detailsText, { color: colors.text }]}>
+                {detailsAlert?.alert_details ?? ''}
+              </Text>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1425,19 +1822,57 @@ export default function ConfigurationScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, { backgroundColor: colors.surface }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>{t('addTickerName')}</Text>
-            <View style={styles.inputGroup}>
-              <Text style={[styles.label, { color: colors.textSecondary }]}>{t('tickerSymbol')}</Text>
-              <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]} value={newNameTicker} onChangeText={setNewNameTicker} placeholder="e.g., AAPL" placeholderTextColor={colors.textTertiary} autoCapitalize="characters" autoCorrect={false} />
-            </View>
-            <View style={styles.inputGroup}>
-              <Text style={[styles.label, { color: colors.textSecondary }]}>{t('companyName')}</Text>
-              <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]} value={newNameValue} onChangeText={setNewNameValue} placeholder="e.g., Apple Inc." placeholderTextColor={colors.textTertiary} autoCapitalize="words" />
-            </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>{t('tickerSymbol')} *</Text>
+                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newNameTicker} onChangeText={setNewNameTicker} placeholder="e.g., AAPL"
+                  placeholderTextColor={colors.textTertiary} autoCapitalize="characters" autoCorrect={false} />
+              </View>
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>{t('companyName')} *</Text>
+                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newNameValue} onChangeText={setNewNameValue} placeholder="e.g., Apple Inc."
+                  placeholderTextColor={colors.textTertiary} autoCapitalize="words" />
+              </View>
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Balanz URL (AR$)' : 'Balanz URL (AR$)'}
+                </Text>
+                <TextInput
+                  style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newNameBalanzUrlArg}
+                  onChangeText={setNewNameBalanzUrlArg}
+                  placeholder="https://..."
+                  placeholderTextColor={colors.textTertiary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                />
+              </View>
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  {language === 'es' ? 'Balanz URL (US$)' : 'Balanz URL (US$)'}
+                </Text>
+                <TextInput
+                  style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newNameBalanzUrlUsa}
+                  onChangeText={setNewNameBalanzUrlUsa}
+                  placeholder="https://..."
+                  placeholderTextColor={colors.textTertiary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                />
+              </View>
+            </ScrollView>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => { setShowAddNameModal(false); setNewNameTicker(''); setNewNameValue(''); }} disabled={savingName}>
+              <TouchableOpacity style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => { setShowAddNameModal(false); setNewNameTicker(''); setNewNameValue(''); setNewNameBalanzUrlArg(''); setNewNameBalanzUrlUsa(''); }} disabled={savingName}>
                 <Text style={[styles.buttonSecondaryText, { color: colors.text }]}>{t('cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.button, styles.buttonPrimary, savingName && styles.buttonDisabled]} onPress={handleSaveName} disabled={savingName}>
+              <TouchableOpacity style={[styles.button, styles.buttonPrimary, savingName && styles.buttonDisabled]}
+                onPress={handleSaveName} disabled={savingName}>
                 {savingName ? <ActivityIndicator color={colors.background} size="small" /> : <Text style={[styles.buttonPrimaryText, { color: colors.background }]}>{t('save')}</Text>}
               </TouchableOpacity>
             </View>
@@ -1450,15 +1885,47 @@ export default function ConfigurationScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, { backgroundColor: colors.surface }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>Edit: {editingName?.ticker}</Text>
-            <View style={styles.inputGroup}>
-              <Text style={[styles.label, { color: colors.textSecondary }]}>{t('companyName')}</Text>
-              <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]} value={newNameValue} onChangeText={setNewNameValue} placeholder="e.g., Apple Inc." placeholderTextColor={colors.textTertiary} autoCapitalize="words" />
-            </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>{t('companyName')} *</Text>
+                <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newNameValue} onChangeText={setNewNameValue} placeholder="e.g., Apple Inc."
+                  placeholderTextColor={colors.textTertiary} autoCapitalize="words" />
+              </View>
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>Balanz URL (AR$)</Text>
+                <TextInput
+                  style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newNameBalanzUrlArg}
+                  onChangeText={setNewNameBalanzUrlArg}
+                  placeholder="https://..."
+                  placeholderTextColor={colors.textTertiary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                />
+              </View>
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>Balanz URL (US$)</Text>
+                <TextInput
+                  style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                  value={newNameBalanzUrlUsa}
+                  onChangeText={setNewNameBalanzUrlUsa}
+                  placeholder="https://..."
+                  placeholderTextColor={colors.textTertiary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                />
+              </View>
+            </ScrollView>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => { setShowEditNameModal(false); setEditingName(null); setNewNameValue(''); }} disabled={savingName}>
+              <TouchableOpacity style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => { setShowEditNameModal(false); setEditingName(null); setNewNameValue(''); setNewNameBalanzUrlArg(''); setNewNameBalanzUrlUsa(''); }} disabled={savingName}>
                 <Text style={[styles.buttonSecondaryText, { color: colors.text }]}>{t('cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.button, styles.buttonPrimary, savingName && styles.buttonDisabled]} onPress={handleUpdateName} disabled={savingName}>
+              <TouchableOpacity style={[styles.button, styles.buttonPrimary, savingName && styles.buttonDisabled]}
+                onPress={handleUpdateName} disabled={savingName}>
                 {savingName ? <ActivityIndicator color={colors.background} size="small" /> : <Text style={[styles.buttonPrimaryText, { color: colors.background }]}>{t('update')}</Text>}
               </TouchableOpacity>
             </View>
@@ -1473,29 +1940,31 @@ export default function ConfigurationScreen() {
             <Text style={[styles.modalTitle, { color: colors.text }]}>{t('addAccount')}</Text>
             <View style={styles.inputGroup}>
               <Text style={[styles.label, { color: colors.textSecondary }]}>{t('emailAddress2')}</Text>
-              <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]} value={newAccountEmail} onChangeText={setNewAccountEmail} placeholder="user@example.com" placeholderTextColor={colors.textTertiary} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
+              <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+                value={newAccountEmail} onChangeText={setNewAccountEmail} placeholder="user@example.com"
+                placeholderTextColor={colors.textTertiary} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
             </View>
             <View style={styles.inputGroup}>
               <Text style={[styles.label, { color: colors.textSecondary }]}>{t('selectAccountType')}</Text>
               <View style={styles.sliderRow}>
                 {allowedAccountTypes.map((type) => (
-                  <TouchableOpacity
-                    key={type}
+                  <TouchableOpacity key={type}
                     style={[styles.sliderOption, { backgroundColor: colors.card, borderColor: colors.border }, newAccountType === type && { backgroundColor: getAccountTypeBadgeColor(type), borderColor: getAccountTypeBadgeColor(type) }]}
-                    onPress={() => setNewAccountType(type)}
-                  >
+                    onPress={() => setNewAccountType(type)}>
                     <Text style={[styles.sliderOptionText, { color: newAccountType === type ? '#fff' : colors.textSecondary }]}>
-                        {type === 'Free' ? 'Free (F)' : type === 'Affiliate' ? 'Affiliate (A)' : type === 'Admin' ? 'Admin (M)' : 'Dev (D)'}
-                      </Text>
+                      {type === 'Free' ? 'Free (F)' : type === 'Affiliate' ? 'Affiliate (A)' : type === 'Admin' ? 'Admin (M)' : 'Dev (D)'}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </View>
             </View>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => setShowAddAccountModal(false)} disabled={savingAccount}>
+              <TouchableOpacity style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => setShowAddAccountModal(false)} disabled={savingAccount}>
                 <Text style={[styles.buttonSecondaryText, { color: colors.text }]}>{t('cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.button, styles.buttonPrimary, savingAccount && styles.buttonDisabled]} onPress={handleAddAccount} disabled={savingAccount}>
+              <TouchableOpacity style={[styles.button, styles.buttonPrimary, savingAccount && styles.buttonDisabled]}
+                onPress={handleAddAccount} disabled={savingAccount}>
                 {savingAccount ? <ActivityIndicator color={colors.background} size="small" /> : <Text style={[styles.buttonPrimaryText, { color: colors.background }]}>{t('add')}</Text>}
               </TouchableOpacity>
             </View>
@@ -1513,21 +1982,21 @@ export default function ConfigurationScreen() {
               <Text style={[styles.label, { color: colors.textSecondary }]}>{t('selectAccountType')}</Text>
               <View style={styles.sliderRow}>
                 {allowedAccountTypes.map((type) => (
-                  <TouchableOpacity
-                    key={type}
+                  <TouchableOpacity key={type}
                     style={[styles.sliderOption, { backgroundColor: colors.card, borderColor: colors.border }, newAccountType === type && { backgroundColor: getAccountTypeBadgeColor(type), borderColor: getAccountTypeBadgeColor(type) }]}
-                    onPress={() => setNewAccountType(type)}
-                  >
+                    onPress={() => setNewAccountType(type)}>
                     <Text style={[styles.sliderOptionText, { color: newAccountType === type ? '#fff' : colors.textSecondary }]}>{type}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
             </View>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => { setShowEditAccountModal(false); setEditingAccount(null); }} disabled={savingAccount}>
+              <TouchableOpacity style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => { setShowEditAccountModal(false); setEditingAccount(null); }} disabled={savingAccount}>
                 <Text style={[styles.buttonSecondaryText, { color: colors.text }]}>{t('cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.button, styles.buttonPrimary, savingAccount && styles.buttonDisabled]} onPress={handleUpdateAccount} disabled={savingAccount}>
+              <TouchableOpacity style={[styles.button, styles.buttonPrimary, savingAccount && styles.buttonDisabled]}
+                onPress={handleUpdateAccount} disabled={savingAccount}>
                 {savingAccount ? <ActivityIndicator color={colors.background} size="small" /> : <Text style={[styles.buttonPrimaryText, { color: colors.background }]}>{t('update')}</Text>}
               </TouchableOpacity>
             </View>
@@ -1564,24 +2033,50 @@ const styles = StyleSheet.create({
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', padding: spacing.md, paddingBottom: spacing.sm },
   tickerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   ticker: { ...typography.h3 },
-  marketBadge: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
-  marketBadgeText: { fontSize: 10, fontWeight: '700' },
   tickerName: { ...typography.caption, marginTop: 2 },
   miniChip: { flexDirection: 'row', alignItems: 'center', gap: 3, borderWidth: 1, borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
   miniChipText: { fontSize: 10, fontWeight: '600' },
   conditionBadge: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: 8 },
   conditionDot: { width: 7, height: 7, borderRadius: 4 },
   conditionText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
+  // kept for backward compat (name items, account items)
   grid: { flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: 1, paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.sm },
   gridCell: { width: '33.33%', paddingVertical: spacing.xs, paddingRight: spacing.xs },
   gridLabel: { ...typography.caption, marginBottom: 2 },
   gridValue: { ...typography.bodySmall, fontWeight: '600' },
-  // Responsive action buttons
+  // Alert card layout (mirrors AlertCard.tsx)
+  tickerBlock: { flex: 1, marginRight: spacing.sm },
+  metaDate: { ...typography.caption },
+  headerRight: { alignItems: 'flex-end', gap: spacing.xs },
+  priceBlock: { borderTopWidth: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  priceRow: { flexDirection: 'row' },
+  priceCell: { flex: 1, paddingRight: spacing.xs },
+  priceLabel: { ...typography.caption, marginBottom: 2 },
+  priceValue: { ...typography.bodySmall, fontWeight: '600' },
+  metricsRow: { flexDirection: 'row', borderTopWidth: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  metricCell: { flex: 1, paddingRight: spacing.xs },
+  profileActionsRow: { flexDirection: 'row', borderTopWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
+  profileActionCell: { flex: 1, alignItems: 'center', paddingHorizontal: 2 },
+  profileActionLabel: { fontSize: 8, textAlign: 'center', marginBottom: 2, textTransform: 'uppercase', fontWeight: '600' },
+  profileActionValue: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', textAlign: 'center' },
+  bottomBar: { flexDirection: 'row', borderTopWidth: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  bottomBarItem: { flex: 1, alignItems: 'center', gap: spacing.xs },
+  bottomBarDivider: { width: 1, marginHorizontal: spacing.sm },
+  bottomBarLabel: { ...typography.caption, textAlign: 'center' },
+  bottomBarBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  detailsModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  detailsModalSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: spacing.lg, maxHeight: '70%' },
+  detailsModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
+  detailsModalTitle: { ...typography.h3, flex: 1, marginRight: spacing.sm },
+  detailsText: { ...typography.body, lineHeight: 24 },
   cardActions: { flexDirection: 'row', borderTopWidth: 1, padding: spacing.sm, gap: spacing.sm },
   cardActionBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, borderWidth: 1, borderRadius: 8, paddingVertical: 8 },
   cardActionText: { fontSize: 12, fontWeight: '600' },
   accountBadge: { alignSelf: 'flex-start', borderWidth: 1, borderRadius: 8, paddingHorizontal: spacing.sm, paddingVertical: 3, marginTop: spacing.xs },
   accountBadgeText: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
+  nameUrlRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, borderTopWidth: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  nameUrlChip: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 8, paddingHorizontal: spacing.sm, paddingVertical: 4 },
+  nameUrlChipText: { fontSize: 11, fontWeight: '600' },
   naRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   naLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   naLabel: { ...typography.bodySmall, fontWeight: '500' },
@@ -1596,9 +2091,12 @@ const styles = StyleSheet.create({
   sliderGroup: { marginBottom: spacing.md },
   label: { ...typography.bodySmall, fontWeight: '500', marginBottom: spacing.sm },
   input: { ...typography.body, padding: spacing.md, borderRadius: 12, borderWidth: 1 },
+  textArea: { ...typography.body, padding: spacing.md, borderRadius: 12, borderWidth: 1, minHeight: 100 },
   sliderRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
   sliderOption: { flex: 1, minWidth: 70, padding: spacing.sm, borderRadius: 10, alignItems: 'center', borderWidth: 1 },
   sliderOptionText: { fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  lockedActionRow: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 10, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, alignSelf: 'flex-start' },
+  lockedActionText: { fontSize: 12, fontWeight: '500', fontStyle: 'italic' },
   modalActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   button: { flex: 1, padding: spacing.md, borderRadius: 12, alignItems: 'center' },
   buttonPrimary: { backgroundColor: '#10b981' },

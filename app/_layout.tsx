@@ -6,8 +6,7 @@ import { WatchlistProvider } from '@/contexts/WatchlistContext';
 import { Stack, router } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useEffect, useRef } from 'react';
-import * as Notifications from 'expo-notifications';
-import { requestNotificationPermissions } from '@/services/notificationService';
+import { Platform } from 'react-native';
 
 // Inner component so useAuth() can be called after AuthProvider mounts
 function AppWithAccountType({ children }: { children: React.ReactNode }) {
@@ -16,32 +15,55 @@ function AppWithAccountType({ children }: { children: React.ReactNode }) {
   const responseListener = useRef<any>(null);
 
   useEffect(() => {
-    // Request notification permissions on mount
-    requestNotificationPermissions().catch(() => {});
+    if (Platform.OS === 'web') return;
 
-    // Listen for notifications received while app is in foreground
-    notificationListener.current = Notifications.addNotificationReceivedListener(() => {
-      // Notification received — no action needed, handler config handles display
-    });
+    let cleanup: (() => void) | undefined;
 
-    // Handle notification tap — navigate to Alerts tab
-    responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data;
-      if (data?.screen) {
-        router.replace('/(tabs)');
-      } else {
-        router.replace('/(tabs)');
-      }
-    });
+    const setupNotifications = async () => {
+      try {
+        const Notifications = await import('expo-notifications');
 
-    return () => {
-      if (notificationListener.current) {
-        Notifications.removeNotificationSubscription(notificationListener.current);
-      }
-      if (responseListener.current) {
-        Notifications.removeNotificationSubscription(responseListener.current);
+        // Request permissions
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        if (existingStatus !== 'granted') {
+          await Notifications.requestPermissionsAsync();
+        }
+
+        // Setup notification channel for Android (required for Android 8+)
+        if (Platform.OS === 'android') {
+          await Notifications.setNotificationChannelAsync('alerts', {
+            name: 'Stock Alerts',
+            importance: Notifications.AndroidImportance.MAX,
+            vibrationPattern: [0, 250, 250, 250],
+            lightColor: '#10b981',
+            enableVibrate: true,
+            showBadge: true,
+          });
+        }
+
+        notificationListener.current = Notifications.addNotificationReceivedListener(() => {});
+        responseListener.current = Notifications.addNotificationResponseReceivedListener(() => {
+          router.replace('/(tabs)');
+        });
+
+        cleanup = () => {
+          try {
+            if (notificationListener.current) {
+              Notifications.removeNotificationSubscription(notificationListener.current);
+            }
+            if (responseListener.current) {
+              Notifications.removeNotificationSubscription(responseListener.current);
+            }
+          } catch {}
+        };
+      } catch {
+        // Notifications not available in this environment
       }
     };
+
+    setupNotifications();
+
+    return () => { cleanup?.(); };
   }, []);
 
   return (
@@ -58,18 +80,19 @@ export default function RootLayout() {
     <AlertProvider>
       <SafeAreaProvider>
         <ThemeProvider>
-          <LanguageProvider>
-            <AuthProvider>
+          <AuthProvider>
+            <LanguageProvider>
               <AppWithAccountType>
                 <Stack screenOptions={{ headerShown: false }}>
                   <Stack.Screen name="index" options={{ headerShown: false }} />
                   <Stack.Screen name="login" options={{ headerShown: false }} />
                   <Stack.Screen name="language-selection" options={{ headerShown: false }} />
+                  <Stack.Screen name="terms-and-conditions" options={{ headerShown: false }} />
                   <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                 </Stack>
               </AppWithAccountType>
-            </AuthProvider>
-          </LanguageProvider>
+            </LanguageProvider>
+          </AuthProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </AlertProvider>

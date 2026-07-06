@@ -33,6 +33,8 @@ interface LanguageContextType {
   setMarketFilter: (value: MarketFilter) => Promise<void>;
   notificationsEnabled: boolean;
   setNotificationsEnabled: (value: boolean) => Promise<void>;
+  /** True while AsyncStorage preferences are being loaded on first mount */
+  prefsLoading: boolean;
 }
 
 export const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -158,7 +160,9 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     return translations[language][key as keyof typeof translations.en] || key;
   };
 
-  if (loading) return null;
+  // Don't block render while loading preferences — use defaults.
+  // Returning null here causes a blank screen crash on Android.
+  // The root navigator (app/index.tsx) already handles loading state via useAuth().
 
   return (
     <LanguageContext.Provider
@@ -179,6 +183,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
         setMarketFilter,
         notificationsEnabled,
         setNotificationsEnabled,
+        prefsLoading: loading,
       }}
     >
       {children}

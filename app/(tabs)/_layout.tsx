@@ -61,7 +61,7 @@ export default function TabLayout() {
         options={{
           title: t('myAlerts'),
           tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="visibility" size={size} color={color} />
+            <MaterialIcons name="notifications" size={size} color={color} />
           ),
         }}
       />
