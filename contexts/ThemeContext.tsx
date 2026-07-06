@@ -72,8 +72,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setThemeState(mode);
   };
 
-  // Don't block render on theme load — use default dark until loaded
-  // (prevents blank screen crash on Android slow start)
+  if (!loaded) return null;
 
   return (
     <ThemeContext.Provider

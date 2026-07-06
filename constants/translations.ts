@@ -150,8 +150,8 @@ export const translations = {
     closedFirst: 'Closed First',
 
     // ── Ticker Names ──────────────────────────────────────────────────────────
-    tickerNames: 'Tickers Info',
-    addTickerName: 'Add Ticker Info',
+    tickerNames: 'Ticker Names',
+    addTickerName: 'Add Ticker Name',
     noTickerNames: 'No Ticker Names',
     tickerSymbol: 'Ticker Symbol',
     companyName: 'Company Name',
@@ -537,8 +537,8 @@ This Privacy Policy may be updated periodically. Continued use implies acceptanc
     closedFirst: 'Cerradas Primero',
 
     // ── Ticker Names ──────────────────────────────────────────────────────────
-    tickerNames: 'Tickers Info',
-    addTickerName: 'Agregar Datos',
+    tickerNames: 'Nombres de Tickers',
+    addTickerName: 'Agregar Nombre',
     noTickerNames: 'Sin Nombres de Tickers',
     tickerSymbol: 'Símbolo Ticker',
     companyName: 'Nombre de Empresa',

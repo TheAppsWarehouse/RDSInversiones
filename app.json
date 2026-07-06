@@ -2,18 +2,18 @@
   "expo": {
     "name": "onspace-app",
     "slug": "onspace-app",
-    "version": "1.0.5",
+    "version": "1.0.1",
     "orientation": "default",
     "icon": "./assets/images/logo.png",
     "scheme": "onspaceapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "package": "theappswarehouse.RDSInversiones.app",
-      "versionCode": 1782849035,
+      "versionCode": 1777295847,
       "ndk": {
         "abiFilters": ["armeabi-v7a", "arm64-v8a"]
       },
@@ -21,22 +21,8 @@
       "screenOrientation": "unspecified",
       "privacyPolicy": "https://drive.google.com/file/d/15AxAykjO9dCgbqdI-RCQT_Oydrer5LfC/view?usp=drive_link",
       "softwareKeyboardLayoutMode": "pan",
-      "permissions": ["POST_NOTIFICATIONS", "VIBRATE"],
+      "permissions": ["POST_NOTIFICATIONS"],
       "blockedPermissions": [
-        "android.permission.ACCESS_WIFI_STATE",
-        "android.permission.DETECT_SCREEN_CAPTURE",
-        "android.permission.DISABLE_KEYGUARD",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
-        "android.permission.SYSTEM_ALERT_WINDOW",
-        "android.permission.TURN_SCREEN_ON",
-        "com.android.vending.CHECK_LICENSE",
-        "com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE",
-        "com.htc.launcher.permission.READ_SETTINGS",
-        "com.htc.launcher.permission.UPDATE_SHORTCUT",
-        "android.permission.USE_EXACT_ALARM",
-        "android.permission.USE_FULL_SCREEN_INTENT",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_MEDIA_AUDIO",
@@ -66,6 +52,7 @@
         "android.permission.BLUETOOTH_CONNECT",
         "android.permission.BLUETOOTH_SCAN",
         "android.permission.NFC",
+        "android.permission.VIBRATE",
         "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "android.permission.FOREGROUND_SERVICE_CAMERA",
@@ -86,7 +73,7 @@
         "foregroundImage": "./assets/images/logo.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": false
+      "edgeToEdgeEnabled": true
     },
     "web": {
       "bundler": "metro",
@@ -95,19 +82,11 @@
     },
     "plugins": [
       "expo-router",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/images/icon.png",
-          "color": "#10b981",
-          "defaultChannel": "alerts",
-          "sounds": []
-        }
-      ],
+      "react-native-edge-to-edge",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/icon.png",
+          "image": "./assets/images/logo.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"

@@ -15,12 +15,11 @@ import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
-import { alertService, getAlertMarkets } from '@/services/alertService';
-import { Alert } from '@/types/stock';
+import { alertService, calculateYield, calculateElapsedDays, formatElapsed, formatPrice } from '@/services/alertService';
+import { Alert, AlertCondition } from '@/types/stock';
 import { useLanguage } from '@/hooks/useLanguage';
 import { useAccountType } from '@/hooks/useAccountType';
 import { useWatchlist } from '@/contexts/WatchlistContext';
-import { AlertCard } from '@/components/feature/AlertCard';
 
 type SortType = 'newestFirst' | 'oldestFirst' | 'alphabetAZ' | 'alphabetZA' | 'currentFirst' | 'closedFirst';
 
@@ -76,22 +75,18 @@ export default function AlertsScreen() {
   const applySort = (type: SortType) => {
     const q = search.trim().toLowerCase();
 
-    const searched = q
-      ? alerts.filter(
+    let marketFiltered = alerts;
+    if (marketFilter !== 'ALL') {
+      marketFiltered = alerts.filter((a) => (a.market ?? 'EEUU') === marketFilter);
+    }
+
+    const filtered = q
+      ? marketFiltered.filter(
           (a) =>
             a.ticker.toLowerCase().includes(q) ||
             (a.ticker_name ?? '').toLowerCase().includes(q)
         )
-      : alerts;
-
-    const filtered = searched.filter((alert) => {
-      const { hasARS, hasUSD } = getAlertMarkets(alert);
-
-      if (marketFilter === 'ARG') return hasARS;
-      if (marketFilter === 'EEUU') return hasUSD;
-
-      return true;
-    });
+      : marketFiltered;
 
     const sorted = [...filtered].sort((a, b) => {
       switch (type) {
@@ -122,6 +117,49 @@ export default function AlertsScreen() {
     setTogglingWatchlist(null);
   };
 
+  const formatDate = (d: string) =>
+    new Date(d).toLocaleDateString(language === 'es' ? 'es-AR' : 'en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+  const formatPercent = (val: number | null) => {
+    if (val == null) return '-';
+    const sign = val >= 0 ? '+' : '';
+    return `${sign}${val.toFixed(2)}%`;
+  };
+
+  const getActionLabel = (action: string | null) => {
+    if (!action) return '-';
+    if (action === 'Buy') return t('actionBuy');
+    if (action === 'Sell') return t('actionSell');
+    return t('actionRefrain');
+  };
+
+  const getActionColor = (action: string | null) => {
+    if (action === 'Buy') return colors.bullish;
+    if (action === 'Sell') return colors.bearish;
+    return colors.textSecondary;
+  };
+
+  const getProfileActionColor = (action: string) => {
+    if (action === 'Buy' || action === 'Double') return colors.bullish;
+    if (action === 'Sell' || action === 'Close') return colors.bearish;
+    return colors.textSecondary;
+  };
+
+  const getConditionColor = (cond: AlertCondition) =>
+    cond === 'Current' ? colors.bullish : colors.textSecondary;
+
+  const getConditionLabel = (cond: AlertCondition) =>
+    cond === 'Current' ? t('conditionCurrent') : t('conditionClosed');
+
+  const getYieldColor = (yieldVal: number | null) => {
+    if (yieldVal == null) return colors.textSecondary;
+    return yieldVal >= 0 ? colors.bullish : colors.bearish;
+  };
+
   const sortOptions: { key: SortType; label: string }[] = [
     { key: 'newestFirst', label: t('newestFirst') },
     { key: 'oldestFirst', label: t('oldestFirst') },
@@ -130,6 +168,168 @@ export default function AlertsScreen() {
     { key: 'currentFirst', label: t('currentFirst') },
     { key: 'closedFirst', label: t('closedFirst') },
   ];
+
+  const renderAlertCard = ({ item }: { item: Alert }) => {
+    const yieldVal = calculateYield(item);
+    const elapsedDays = calculateElapsedDays(item);
+    const isClosed = item.alert_condition === 'Closed';
+    const market = item.market ?? 'EEUU';
+    const inWatchlist = isInWatchlist(item.id);
+    const isToggling = togglingWatchlist === item.id;
+
+    return (
+      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        {/* Watchlist bookmark — Free and Affiliate only */}
+        {canWatchlist && (
+          <TouchableOpacity
+            style={[styles.watchlistBtn, {
+              backgroundColor: inWatchlist ? `${colors.primary}20` : `${colors.border}30`,
+              borderColor: inWatchlist ? `${colors.primary}60` : colors.border,
+            }]}
+            onPress={() => handleWatchlistToggle(item.id)}
+            disabled={isToggling}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+          >
+            {isToggling
+              ? <ActivityIndicator size="small" color={colors.primary} />
+              : <MaterialIcons
+                  name={inWatchlist ? 'bookmark' : 'bookmark-border'}
+                  size={18}
+                  color={inWatchlist ? colors.primary : colors.textSecondary}
+                />
+            }
+          </TouchableOpacity>
+        )}
+
+        {/* Header row: ticker + badges */}
+        <View style={[styles.cardHeader, canWatchlist && { paddingRight: 48 }]}>
+          <View style={styles.tickerBlock}>
+            <View style={styles.tickerRow}>
+              <Text style={[styles.ticker, { color: colors.text }]}>{item.ticker}</Text>
+              <View style={[styles.marketBadge, {
+                backgroundColor: market === 'ARG' ? `${colors.primary}20` : `${colors.success ?? colors.primary}15`,
+                borderColor: market === 'ARG' ? `${colors.primary}50` : `${colors.success ?? colors.primary}40`,
+              }]}>
+                <Text style={[styles.marketBadgeText, {
+                  color: market === 'ARG' ? colors.primary : (colors.success ?? colors.primary),
+                }]}>
+                  {market === 'ARG' ? 'AR$' : 'US$'}
+                </Text>
+              </View>
+            </View>
+            {item.ticker_name ? (
+              <Text style={[styles.tickerName, { color: colors.textSecondary }]}>{item.ticker_name}</Text>
+            ) : null}
+          </View>
+          <View style={styles.headerRight}>
+            <View style={[styles.targetBadge, {
+              backgroundColor: item.target_accounts === 'Subscribers' ? `${colors.primary}15` : `${colors.textSecondary}12`,
+              borderColor: item.target_accounts === 'Subscribers' ? `${colors.primary}40` : `${colors.border}`,
+            }]}>
+              <MaterialIcons
+                name={item.target_accounts === 'Subscribers' ? 'star' : 'public'}
+                size={11}
+                color={item.target_accounts === 'Subscribers' ? colors.primary : colors.textSecondary}
+              />
+              <Text style={[styles.targetBadgeText, {
+                color: item.target_accounts === 'Subscribers' ? colors.primary : colors.textSecondary,
+              }]}>
+                {item.target_accounts === 'Subscribers' ? t('targetSubscribers') : t('targetFreeAccounts')}
+              </Text>
+            </View>
+            <View style={[styles.conditionBadge, { backgroundColor: `${getConditionColor(item.alert_condition)}18` }]}>
+              <View style={[styles.conditionDot, { backgroundColor: getConditionColor(item.alert_condition) }]} />
+              <Text style={[styles.conditionText, { color: getConditionColor(item.alert_condition) }]}>
+                {getConditionLabel(item.alert_condition)}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Action + Dates */}
+        <View style={styles.metaRow}>
+          {item.action != null && (
+            <View style={[styles.actionChip, { backgroundColor: `${getActionColor(item.action)}18` }]}>
+              <Text style={[styles.actionChipText, { color: getActionColor(item.action) }]}>
+                {getActionLabel(item.action)}
+              </Text>
+            </View>
+          )}
+          <Text style={[styles.metaDate, { color: colors.textSecondary }]}>
+            {t('openingDate')}: {formatDate(item.opening_date)}
+          </Text>
+          {isClosed && item.closing_date ? (
+            <Text style={[styles.metaDate, { color: colors.textSecondary }]}>
+              {t('closingDate')}: {formatDate(item.closing_date)}
+            </Text>
+          ) : null}
+        </View>
+
+        {/* Prices grid */}
+        <View style={[styles.grid, { borderColor: colors.border }]}>
+          {item.entry_price != null && (
+            <View style={styles.gridCell}>
+              <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('entryPrice')}</Text>
+              <Text style={[styles.gridValue, { color: colors.text }]}>{formatPrice(item.entry_price, market)}</Text>
+            </View>
+          )}
+          {item.re_entry_price != null && (
+            <View style={styles.gridCell}>
+              <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('reEntryPrice')}</Text>
+              <Text style={[styles.gridValue, { color: colors.text }]}>{formatPrice(item.re_entry_price, market)}</Text>
+            </View>
+          )}
+          {!isClosed && item.current_price != null && (
+            <View style={styles.gridCell}>
+              <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('currentPrice')}</Text>
+              <Text style={[styles.gridValue, { color: colors.text }]}>{formatPrice(item.current_price, market)}</Text>
+            </View>
+          )}
+          {isClosed && item.closing_price != null && (
+            <View style={styles.gridCell}>
+              <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('closingPrice')}</Text>
+              <Text style={[styles.gridValue, { color: colors.text }]}>{formatPrice(item.closing_price, market)}</Text>
+            </View>
+          )}
+          {item.three_months_goal != null && (
+            <View style={styles.gridCell}>
+              <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('threeMonthsGoal')}</Text>
+              <Text style={[styles.gridValue, { color: colors.primary }]}>{item.three_months_goal.toFixed(1)}%</Text>
+            </View>
+          )}
+          {yieldVal != null && (
+            <View style={styles.gridCell}>
+              <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('yieldLabel')}</Text>
+              <Text style={[styles.gridValue, { color: getYieldColor(yieldVal) }]}>{formatPercent(yieldVal)}</Text>
+            </View>
+          )}
+          <View style={styles.gridCell}>
+            <Text style={[styles.gridLabel, { color: colors.textSecondary }]}>{t('elapsedTime')}</Text>
+            <Text style={[styles.gridValue, { color: colors.text }]}>{formatElapsed(elapsedDays)}</Text>
+          </View>
+        </View>
+
+        {/* Profile actions */}
+        <View style={[styles.profileActionsRow, { borderTopColor: colors.border }]}>
+          {[
+            { key: 'action_conservative', label: t('actionConservative') },
+            { key: 'action_moderate', label: t('actionModerate') },
+            { key: 'action_aggressive', label: t('actionRisky') },
+          ].map(({ key, label }) => {
+            const val = item[key as keyof Alert] as string;
+            return (
+              <View key={key} style={styles.profileActionCell}>
+                <Text style={[styles.profileActionLabel, { color: colors.textSecondary }]}>{label}</Text>
+                <Text style={[styles.profileActionValue, { color: getProfileActionColor(val) }]}>
+                  {val === 'Buy' ? t('actionBuy') : val === 'Sell' ? t('actionSell') : val === 'Double' ? 'Double' : val === 'Hold' ? 'Hold' : val === 'Close' ? 'Close' : val === 'Keep Out' ? 'Keep Out' : t('actionRefrain')}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      </View>
+    );
+  };
 
   if (loading) {
     return (
@@ -204,16 +404,7 @@ export default function AlertsScreen() {
       ) : (
         <FlatList
           data={displayAlerts}
-          renderItem={({ item }) => (
-            <AlertCard
-              item={item}
-              canWatchlist={canWatchlist}
-              isInWatchlist={isInWatchlist(item.id)}
-              isTogglingWatchlist={togglingWatchlist === item.id}
-              onWatchlistToggle={() => handleWatchlistToggle(item.id)}
-              marketFilter={marketFilter}
-            />
-          )}
+          renderItem={renderAlertCard}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
@@ -256,4 +447,107 @@ const styles = StyleSheet.create({
   emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xxl },
   emptyTitle: { ...typography.h3, marginTop: spacing.lg },
   emptySubtitle: { ...typography.body, marginTop: spacing.sm, textAlign: 'center' },
+
+  // Card
+  card: {
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: spacing.sm,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  watchlistBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    padding: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  tickerBlock: { flex: 1, marginRight: spacing.sm },
+  tickerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  ticker: { ...typography.h3 },
+  marketBadge: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  marketBadgeText: { fontSize: 10, fontWeight: '700' },
+  tickerName: { ...typography.caption, marginTop: 2 },
+  headerRight: { alignItems: 'flex-end', gap: spacing.xs },
+  targetBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  targetBadgeText: { fontSize: 10, fontWeight: '600' },
+  conditionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    alignSelf: 'flex-start',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  conditionDot: { width: 7, height: 7, borderRadius: 4 },
+  conditionText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
+
+  metaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  actionChip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  actionChipText: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
+  metaDate: { ...typography.caption },
+
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    borderTopWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+  },
+  gridCell: {
+    width: '33.33%',
+    paddingVertical: spacing.xs,
+    paddingRight: spacing.xs,
+  },
+  gridLabel: { ...typography.caption, marginBottom: 2 },
+  gridValue: { ...typography.bodySmall, fontWeight: '600' },
+
+  profileActionsRow: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  profileActionCell: { flex: 1, alignItems: 'center' },
+  profileActionLabel: { fontSize: 9, textAlign: 'center', marginBottom: 2, textTransform: 'uppercase', fontWeight: '600' },
+  profileActionValue: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', textAlign: 'center' },
 });
