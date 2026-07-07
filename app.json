@@ -24,7 +24,6 @@
       "permissions": ["POST_NOTIFICATIONS", "VIBRATE"],
       "blockedPermissions": [
         "android.permission.ACCESS_WIFI_STATE",
-        "android.permission.DETECT_SCREEN_CAPTURE",
         "android.permission.DISABLE_KEYGUARD",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.MODIFY_AUDIO_SETTINGS",
