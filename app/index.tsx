@@ -1,16 +1,18 @@
 import { useEffect, useRef } from 'react';
+import { View, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '@/template';
 import { useLanguage } from '@/hooks/useLanguage';
 
 export default function RootScreen() {
   const { user, loading } = useAuth();
-  const { termsUpToDate, isFirstLaunch, refreshTermsStatus } = useLanguage();
+  const { termsUpToDate, isFirstLaunch, refreshTermsStatus, prefsLoading } = useLanguage();
   // Track whether we've already run the DB sync for this session
   const syncedRef = useRef(false);
 
   useEffect(() => {
-    if (loading) return;
+    // Wait for both auth state AND local preferences to finish loading
+    if (loading || prefsLoading) return;
 
     if (user) {
       // Sync DB acceptance status once per session before routing
@@ -33,7 +35,12 @@ export default function RootScreen() {
       syncedRef.current = false;
       router.replace('/language-selection');
     }
-  }, [loading, user, termsUpToDate, isFirstLaunch]);
+  }, [loading, prefsLoading, user, termsUpToDate, isFirstLaunch]);
 
-  return null;
+  // Render a minimal loading indicator — never return null on Android
+  return (
+    <View style={{ flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center' }}>
+      <ActivityIndicator size="large" color="#10b981" />
+    </View>
+  );
 }

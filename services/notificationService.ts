@@ -1,46 +1,68 @@
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { FunctionsHttpError } from '@supabase/supabase-js';
 import { getSupabaseClient } from '@/template';
 import { Alert } from '@/types/stock';
 import Constants from 'expo-constants';
 
-// Configure how notifications appear when app is in foreground
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+// Lazily resolved Notifications module — never evaluated at import time.
+// This prevents crashes on web / Live Preview where expo-notifications is unavailable.
+type NotificationsModule = typeof import('expo-notifications');
+let _notif: NotificationsModule | null = null;
+let _handlerSet = false;
+
+function N(): NotificationsModule | null {
+  if (Platform.OS === 'web') return null;
+  if (_notif) return _notif;
+  try {
+    _notif = require('expo-notifications') as NotificationsModule;
+  } catch {
+    _notif = null;
+    return null;
+  }
+  // Set handler exactly once after the module resolves
+  if (!_handlerSet) {
+    try {
+      _notif!.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+        }),
+      });
+      _handlerSet = true;
+    } catch {}
+  }
+  return _notif;
+}
 
 export async function requestNotificationPermissions(): Promise<boolean> {
-  if (Platform.OS === 'web') return false;
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  if (existingStatus === 'granted') return true;
-  const { status } = await Notifications.requestPermissionsAsync();
-  return status === 'granted';
+  const n = N();
+  if (!n) return false;
+  try {
+    const { status: existingStatus } = await n.getPermissionsAsync();
+    if (existingStatus === 'granted') return true;
+    const { status } = await n.requestPermissionsAsync();
+    return status === 'granted';
+  } catch {
+    return false;
+  }
 }
 
 // ─── Push Token Registration ──────────────────────────────────────────────────
 
-/**
- * Get the Expo Push Token for this device and persist it to the database
- * so the backend can send remote push notifications to this user.
- * Should be called after the user successfully logs in.
- */
 export async function registerPushToken(userId: string): Promise<void> {
   try {
-    if (Platform.OS === 'web') return;
+    const n = N();
+    if (!n) return;
 
-    const { status } = await Notifications.getPermissionsAsync();
+    const { status } = await n.getPermissionsAsync();
     if (status !== 'granted') return;
 
     // Android requires a notification channel
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('alerts', {
+      await n.setNotificationChannelAsync('alerts', {
         name: 'Stock Alerts',
-        importance: Notifications.AndroidImportance.MAX,
+        importance: n.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#10b981',
         enableVibrate: true,
@@ -48,13 +70,12 @@ export async function registerPushToken(userId: string): Promise<void> {
       });
     }
 
-    // projectId is required for standalone builds; fall back gracefully in Expo Go
     const projectId =
       Constants.expoConfig?.extra?.eas?.projectId ??
       Constants.easConfig?.projectId ??
       undefined;
 
-    const tokenData = await Notifications.getExpoPushTokenAsync(
+    const tokenData = await n.getExpoPushTokenAsync(
       projectId ? { projectId } : {}
     );
     const token = tokenData.data;
@@ -68,14 +89,10 @@ export async function registerPushToken(userId: string): Promise<void> {
         { onConflict: 'user_id,token' }
       );
   } catch (error) {
-    // Non-fatal: log but don't block the login flow
     console.log('Push token registration error:', error);
   }
 }
 
-/**
- * Remove all push tokens for this user from the database (call on logout).
- */
 export async function unregisterPushToken(userId: string): Promise<void> {
   try {
     if (Platform.OS === 'web') return;
@@ -86,23 +103,25 @@ export async function unregisterPushToken(userId: string): Promise<void> {
   }
 }
 
-// ─── Local notification (foreground / admin's own device) ────────────────────
+// ─── Local notification ───────────────────────────────────────────────────────
 
 async function scheduleLocalNotification(
   title: string,
   body: string,
   data?: Record<string, any>
 ): Promise<void> {
+  const n = N();
+  if (!n) return;
   try {
-    const { status } = await Notifications.getPermissionsAsync();
+    const { status } = await n.getPermissionsAsync();
     if (status !== 'granted') return;
-    await Notifications.scheduleNotificationAsync({
+    await n.scheduleNotificationAsync({
       content: {
         title,
         body,
         data: data ?? {},
         sound: true,
-        priority: Notifications.AndroidNotificationPriority.MAX,
+        priority: n.AndroidNotificationPriority.MAX,
       },
       trigger: null,
     });
@@ -111,13 +130,8 @@ async function scheduleLocalNotification(
   }
 }
 
-// ─── Remote push via edge function (sends to ALL eligible users' devices) ─────
+// ─── Remote push via edge function ───────────────────────────────────────────
 
-/**
- * Calls the send-alert-email edge function which resolves eligible push tokens
- * from the DB and delivers remote notifications via Expo Push API.
- * This is the primary notification path for all users.
- */
 async function dispatchRemotePush(
   alert: Alert,
   event: 'created' | 'updated' | 'closed',
@@ -170,9 +184,7 @@ export async function dispatchAlertCreated(
   pushEnabled: boolean
 ): Promise<void> {
   if (!pushEnabled) return;
-  // 1. Remote push to all eligible users
   dispatchRemotePush(alert, 'created').catch(() => {});
-  // 2. Local notification on admin's own device
   scheduleLocalNotification(
     `New Alert: ${alert.ticker}`,
     `A new ${alert.action ?? ''} alert was created for ${alert.ticker}.`,
