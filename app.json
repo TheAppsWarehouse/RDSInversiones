@@ -2,7 +2,7 @@
   "expo": {
     "name": "onspace-app",
     "slug": "onspace-app",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "orientation": "default",
     "icon": "./assets/images/logo.png",
     "scheme": "onspaceapp",
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "theappswarehouse.RDSInversiones.app",
-      "versionCode": 1782963624,
+      "versionCode": 1783429456,
       "ndk": {
         "abiFilters": ["armeabi-v7a", "arm64-v8a"]
       },
