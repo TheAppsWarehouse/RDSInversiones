@@ -266,14 +266,41 @@ export const alertService = {
 // ─── Calculation Helpers ───────────────────────────────────────────────────────
 
 /**
+ * Determine the primary action direction of an alert.
+ * Scans all four profile actions in order (conservative → moderate → aggressive → ultra)
+ * and returns the first 'Buy' or 'Sell' found. Returns null if none found.
+ */
+export function getAlertDirection(alert: Alert): 'Buy' | 'Sell' | null {
+  const actions = [
+    alert.action_conservative,
+    alert.action_moderate,
+    alert.action_aggressive,
+    alert.action_ultra_aggressive,
+  ];
+  for (const a of actions) {
+    if (a === 'Buy') return 'Buy';
+    if (a === 'Sell') return 'Sell';
+  }
+  return null;
+}
+
+/**
  * Calculate yield for a given market (ARS or USD).
- * Uses action_conservative as proxy for direction if no legacy action field.
+ *
+ * Direction is derived by scanning profile actions for the first Buy/Sell.
+ *
+ * Buy + Current:  (currentPrice  - entryPrice) / entryPrice * 100
+ * Buy + Closed:   (closingPrice  - entryPrice) / entryPrice * 100
+ * Sell + Current: (entryPrice - currentPrice)  / entryPrice * 100
+ * Sell + Closed:  (entryPrice - closingPrice)  / entryPrice * 100
  */
 export function calculateYieldForMarket(
   alert: Alert,
   market: 'ARS' | 'USD'
 ): number | null {
   const isClosed = alert.alert_condition === 'Closed';
+  const direction = getAlertDirection(alert);
+  if (!direction) return null;
 
   let entryPrice: number | null;
   let comparePrice: number | null;
@@ -288,21 +315,17 @@ export function calculateYieldForMarket(
 
   if (entryPrice == null || entryPrice === 0 || comparePrice == null) return null;
 
-  // Determine direction from conservative action or legacy action
-  const action = alert.action ?? null;
-  const conservativeAction = alert.action_conservative;
-  const isBuy = action === 'Buy' || conservativeAction === 'Buy' || conservativeAction === 'Double' || conservativeAction === 'Hold';
-
-  if (isBuy) {
+  if (direction === 'Buy') {
     return ((comparePrice - entryPrice) / entryPrice) * 100;
   } else {
     return ((entryPrice - comparePrice) / entryPrice) * 100;
   }
 }
 
-// Legacy yield calculation (uses entry_price + current_price)
+/**
+ * Calculate yield — tries USD first, falls back to ARS.
+ */
 export function calculateYield(alert: Alert): number | null {
-  // Try USD first, then ARS
   const usdYield = calculateYieldForMarket(alert, 'USD');
   if (usdYield != null) return usdYield;
   return calculateYieldForMarket(alert, 'ARS');
