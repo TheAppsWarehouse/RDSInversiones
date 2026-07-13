@@ -268,9 +268,11 @@ export const alertService = {
 /**
  * Determine the primary action direction of an alert.
  * Scans all four profile actions in order (conservative → moderate → aggressive → ultra)
- * and returns the first 'Buy' or 'Sell' found. Returns null if none found.
+ * and returns the first 'Buy' or 'Sell' found.
+ * If none found (e.g. all Refrain/Hold/Close/Double/Keep Out), defaults to 'Buy'
+ * because an alert with an entry price implies a long position by default.
  */
-export function getAlertDirection(alert: Alert): 'Buy' | 'Sell' | null {
+export function getAlertDirection(alert: Alert): 'Buy' | 'Sell' {
   const actions = [
     alert.action_conservative,
     alert.action_moderate,
@@ -281,7 +283,8 @@ export function getAlertDirection(alert: Alert): 'Buy' | 'Sell' | null {
     if (a === 'Buy') return 'Buy';
     if (a === 'Sell') return 'Sell';
   }
-  return null;
+  // Default to 'Buy' — an entry price always implies a long directional trade
+  return 'Buy';
 }
 
 /**
@@ -323,12 +326,15 @@ export function calculateYieldForMarket(
 }
 
 /**
- * Calculate yield — tries USD first, falls back to ARS.
+ * Calculate yield using the correct market priority:
+ * - If alert has USD data (entry_price_usd), always use USD yield.
+ * - If alert has only ARS data, use ARS yield.
  */
 export function calculateYield(alert: Alert): number | null {
-  const usdYield = calculateYieldForMarket(alert, 'USD');
-  if (usdYield != null) return usdYield;
-  return calculateYieldForMarket(alert, 'ARS');
+  const { hasARS, hasUSD } = getAlertMarkets(alert);
+  if (hasUSD) return calculateYieldForMarket(alert, 'USD');
+  if (hasARS) return calculateYieldForMarket(alert, 'ARS');
+  return null;
 }
 
 export function calculateElapsedDays(alert: Alert): number {
