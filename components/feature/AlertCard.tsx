@@ -115,8 +115,8 @@ export function AlertCard({
   const arsYield = calculateYieldForMarket(item, 'ARS');
   const usdYield = calculateYieldForMarket(item, 'USD');
 
-  // Use one yield for the "Current Yield" row
-  const displayYield = effectiveShowUSD ? usdYield : arsYield;
+  // Yield priority: USD if alert has USD data, else ARS (regardless of market filter display)
+  const displayYield = hasUSD ? usdYield : arsYield;
 
   // Pick the right details field based on language
   const localizedDetails = language === 'es'
