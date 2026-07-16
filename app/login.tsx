@@ -219,16 +219,16 @@ export default function LoginScreen() {
 
     // Check if account requires OTP 2FA (Admin or Dev)
     setCheckingAccountStatus(true);
-    const requiresOtp = await accountService.requiresOtpLogin(email.trim().toLowerCase());
+    const requiresOtp = await accountService.requiresOtpLogin(email);
     setCheckingAccountStatus(false);
 
     if (requiresOtp) {
       // First validate password
-      const { error: loginError } = await signInWithPassword(email.trim().toLowerCase(), password);
+      const { error: loginError } = await signInWithPassword(email, password);
       if (loginError) { showAlert('Error', loginError); return; }
 
       // Password correct → send OTP for 2FA
-      const { error: otpError } = await sendOTP(email.trim().toLowerCase());
+      const { error: otpError } = await sendOTP(email);
       if (otpError) { showAlert('Error', otpError); return; }
 
       setLoginStep('privileged_otp');
@@ -238,13 +238,13 @@ export default function LoginScreen() {
     }
 
     // Standard password login (Affiliate / Free)
-    const { error, user } = await signInWithPassword(email.trim().toLowerCase(), password);
+    const { error, user } = await signInWithPassword(email, password);
     if (error) { showAlert('Error', error); return; }
 
-    // Navigate on success — user object may be null if auth state resolves asynchronously
-    const uid = user?.id;
-    if (uid) registerPushToken(uid).catch(() => {});
-    router.replace('/(tabs)');
+    if (user) {
+      registerPushToken(user.id).catch(() => {});
+      router.replace('/(tabs)');
+    }
   };
 
   const handleResendPrivilegedOTP = async () => {

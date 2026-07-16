@@ -1,22 +1,17 @@
 /**
  * excelService.native.ts
  * Native (iOS/Android) implementation using xlsx + expo-file-system + expo-sharing.
- *
- * All native modules are required lazily (inside functions) to prevent
- * "Cannot read property 'NativeModule' of undefined" crashes on Android
- * that occur when native modules are accessed at module evaluation time.
  */
 import * as XLSX from 'xlsx';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import * as DocumentPicker from 'expo-document-picker';
 
 export async function exportToExcel(
   sheetName: string,
   rows: Record<string, any>[],
   filename: string
 ): Promise<void> {
-  // Lazy requires — accessed only when function is called, after bridge is ready
-  const FileSystem = require('expo-file-system');
-  const Sharing = require('expo-sharing');
-
   const fallback = rows.length > 0 ? rows : [{}];
   const ws = XLSX.utils.json_to_sheet(fallback);
   const wb = XLSX.utils.book_new();
@@ -33,10 +28,6 @@ export async function exportToExcel(
 }
 
 export async function importFromExcel(): Promise<any[][] | null> {
-  // Lazy requires — accessed only when function is called, after bridge is ready
-  const FileSystem = require('expo-file-system');
-  const DocumentPicker = require('expo-document-picker');
-
   const result = await DocumentPicker.getDocumentAsync({
     type: [
       'application/vnd.ms-excel',

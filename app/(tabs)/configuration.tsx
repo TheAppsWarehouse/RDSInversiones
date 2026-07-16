@@ -876,7 +876,6 @@ export default function ConfigurationScreen() {
     const isClosed = item.alert_condition === 'Closed';
     const arsYield = hasARS ? calculateYieldForMarket(item, 'ARS') : null;
     const usdYield = hasUSD ? calculateYieldForMarket(item, 'USD') : null;
-    // Yield priority: USD if alert has USD data, else ARS
     const displayYield = hasUSD ? usdYield : arsYield;
     const stGoal = item.short_term_goal ?? item.three_months_goal;
 
