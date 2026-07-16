@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "theappswarehouse.RDSInversiones.app",
-      "versionCode": 1782963624,
+      "versionCode": 1784052977,
       "ndk": {
         "abiFilters": ["armeabi-v7a", "arm64-v8a"]
       },
