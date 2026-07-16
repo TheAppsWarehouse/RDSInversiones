@@ -2,12 +2,12 @@
   "expo": {
     "name": "onspace-app",
     "slug": "onspace-app",
-    "version": "1.0.6",
+    "version": "1.0.9",
     "orientation": "default",
     "icon": "./assets/images/logo.png",
     "scheme": "onspaceapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
@@ -85,7 +85,7 @@
         "foregroundImage": "./assets/images/logo.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": false
+      "edgeToEdgeEnabled": true
     },
     "web": {
       "bundler": "metro",
