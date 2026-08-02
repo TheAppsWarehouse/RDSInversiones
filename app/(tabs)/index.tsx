@@ -50,11 +50,13 @@ export default function AlertsScreen() {
     if (error) {
       showAlert(t('error'), error);
     } else if (data) {
-      const oneMonthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const todayStr = new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
       const filtered = data.filter((a) => {
         if (a.alert_condition !== 'Closed') return true;
         if (!a.closing_date) return true;
-        return new Date(a.closing_date).getTime() >= oneMonthAgo;
+        // Keep closed alert only if its closing date is today or in the future
+        const closingDateStr = new Date(a.closing_date).toISOString().slice(0, 10);
+        return closingDateStr >= todayStr;
       });
       setAlerts(filtered);
     }

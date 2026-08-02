@@ -5,6 +5,7 @@ import { ThemeProvider } from '@/contexts/ThemeContext';
 import { WatchlistProvider } from '@/contexts/WatchlistContext';
 import { Stack, router } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 
@@ -83,6 +84,7 @@ export default function RootLayout() {
           <AuthProvider>
             <LanguageProvider>
               <AppWithAccountType>
+                <StatusBar style="auto" translucent />
                 <Stack screenOptions={{ headerShown: false }}>
                   <Stack.Screen name="index" options={{ headerShown: false }} />
                   <Stack.Screen name="login" options={{ headerShown: false }} />
