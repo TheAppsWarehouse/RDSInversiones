@@ -66,32 +66,41 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadPreferences = async () => {
+    // Safety timeout: resolve with defaults after 3s if AsyncStorage hangs
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
     try {
-      const [
-        savedLanguage,
-        firstLaunch,
-        savedTerms,
-        savedTermsVersion,
-        savedKeepSignedIn,
-        savedMarketFilter,
-        savedNotifications,
-      ] = await Promise.all([
-        AsyncStorage.getItem(LANGUAGE_KEY),
-        AsyncStorage.getItem(FIRST_LAUNCH_KEY),
-        AsyncStorage.getItem(TERMS_ACCEPTED_KEY),
-        AsyncStorage.getItem(TERMS_VERSION_KEY),
-        AsyncStorage.getItem(KEEP_SIGNED_IN_KEY),
-        AsyncStorage.getItem(MARKET_FILTER_KEY),
-        AsyncStorage.getItem(NOTIFICATIONS_ENABLED_KEY),
+      const results = await Promise.race([
+        Promise.all([
+          AsyncStorage.getItem(LANGUAGE_KEY),
+          AsyncStorage.getItem(FIRST_LAUNCH_KEY),
+          AsyncStorage.getItem(TERMS_ACCEPTED_KEY),
+          AsyncStorage.getItem(TERMS_VERSION_KEY),
+          AsyncStorage.getItem(KEEP_SIGNED_IN_KEY),
+          AsyncStorage.getItem(MARKET_FILTER_KEY),
+          AsyncStorage.getItem(NOTIFICATIONS_ENABLED_KEY),
+        ]),
+        timeoutPromise,
       ]);
 
-      if (savedLanguage) setLanguageState(savedLanguage as Language);
-      setIsFirstLaunchState(firstLaunch === null);
-      setTermsAcceptedState(savedTerms === 'true');
-      setAcceptedTermsVersionState(savedTermsVersion);
-      setKeepSignedInState(savedKeepSignedIn === 'true');
-      if (savedMarketFilter) setMarketFilterState(savedMarketFilter as MarketFilter);
-      setNotificationsEnabledState(savedNotifications === null ? true : savedNotifications === 'true');
+      if (results !== null) {
+        const [
+          savedLanguage,
+          firstLaunch,
+          savedTerms,
+          savedTermsVersion,
+          savedKeepSignedIn,
+          savedMarketFilter,
+          savedNotifications,
+        ] = results as (string | null)[];
+
+        if (savedLanguage) setLanguageState(savedLanguage as Language);
+        setIsFirstLaunchState(firstLaunch === null);
+        setTermsAcceptedState(savedTerms === 'true');
+        setAcceptedTermsVersionState(savedTermsVersion);
+        setKeepSignedInState(savedKeepSignedIn === 'true');
+        if (savedMarketFilter) setMarketFilterState(savedMarketFilter as MarketFilter);
+        setNotificationsEnabledState(savedNotifications === null ? true : savedNotifications === 'true');
+      }
     } catch (error) {
       console.error('Error loading preferences:', error);
     } finally {
