@@ -18,14 +18,28 @@ export default function RootScreen() {
       // Sync DB acceptance status once per session before routing
       if (!syncedRef.current) {
         syncedRef.current = true;
-        refreshTermsStatus(user.id).then(() => {
-          // After sync, termsUpToDate will update via state — let the next
-          // effect invocation (triggered by termsUpToDate change) do the routing.
-        });
+        refreshTermsStatus(user.id)
+          .then((upToDate) => {
+            // Navigate based on the authoritative result from the sync,
+            // NOT from the termsUpToDate state (which may not have updated yet).
+            if (!upToDate) {
+              router.replace('/terms-and-conditions?mode=accept');
+            } else {
+              router.replace('/(tabs)');
+            }
+          })
+          .catch(() => {
+            // On unexpected error fall back to cached local state
+            if (!termsUpToDate) {
+              router.replace('/terms-and-conditions?mode=accept');
+            } else {
+              router.replace('/(tabs)');
+            }
+          });
         return;
       }
 
-      // T&C check (uses up-to-date local state after DB sync)
+      // Subsequent effect invocations (e.g. T&C accepted mid-session)
       if (!termsUpToDate) {
         router.replace('/terms-and-conditions?mode=accept');
       } else {
