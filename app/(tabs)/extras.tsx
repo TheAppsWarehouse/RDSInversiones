@@ -36,7 +36,7 @@ export default function ExtrasScreen() {
       name: 'Financial Freedom Planner',
       subtitle: 'downloadOnPlayStore',
       iconType: 'image',
-      imageUri: 'https://drive.google.com/thumbnail?id=17ciCcK-faTz4bf4G3AYDUO5WXx4vPiiQ&sz=w500',
+      imageUri: 'https://drive.google.com/thumbnail?id=1JaKai8Frw0prlekUtiU7Ue8TwswBXNA1&sz=w500',
       url: 'https://play.google.com/store/apps/details?id=theappswarehouse.financialfreedomplanner.app',
     },
     {
