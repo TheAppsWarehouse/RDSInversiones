@@ -25,8 +25,8 @@ interface LanguageContextType {
   setTermsAccepted: (value: boolean) => Promise<void>;
   acceptedTermsVersion: string | null;
   termsUpToDate: boolean;
-  /** Re-check DB acceptance status (call after login to sync from server) */
-  refreshTermsStatus: (userId: string) => Promise<void>;
+  /** Re-check DB acceptance status (call after login to sync from server). Returns true if terms are up to date after sync. */
+  refreshTermsStatus: (userId: string) => Promise<boolean>;
   keepSignedIn: boolean;
   setKeepSignedIn: (value: boolean) => Promise<void>;
   marketFilter: MarketFilter;
@@ -125,8 +125,9 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
    * Called after login to reconcile local AsyncStorage cache with the DB.
    * If the DB has an accepted record for the active version, update local state.
    * This ensures users who accepted on another device don't see the T&C screen again.
+   * Returns true if terms are now up to date (accepted current version).
    */
-  const refreshTermsStatus = async (userId: string) => {
+  const refreshTermsStatus = async (userId: string): Promise<boolean> => {
     try {
       const acceptance = await getUserAcceptanceForActiveVersion(userId);
       if (acceptance) {
@@ -135,9 +136,16 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
         await AsyncStorage.setItem(TERMS_VERSION_KEY, CURRENT_TERMS_VERSION);
         setTermsAcceptedState(true);
         setAcceptedTermsVersionState(CURRENT_TERMS_VERSION);
+        return true;
       }
+      // No DB acceptance — fall back to local state
+      const localAccepted = await AsyncStorage.getItem(TERMS_ACCEPTED_KEY);
+      const localVersion = await AsyncStorage.getItem(TERMS_VERSION_KEY);
+      return localAccepted === 'true' && localVersion === CURRENT_TERMS_VERSION;
     } catch (err) {
       console.error('LanguageContext.refreshTermsStatus error:', err);
+      // On error, return current local state
+      return termsAccepted && acceptedTermsVersion === CURRENT_TERMS_VERSION;
     }
   };
 
