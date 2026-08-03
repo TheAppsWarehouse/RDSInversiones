@@ -140,8 +140,7 @@ export function AlertCard({
   const handleBalanzLink = async () => {
     if (!resolvedBalanzUrl) return;
     try {
-      const canOpen = await Linking.canOpenURL(resolvedBalanzUrl);
-      if (canOpen) await Linking.openURL(resolvedBalanzUrl);
+      await Linking.openURL(resolvedBalanzUrl);
     } catch {}
   };
 
