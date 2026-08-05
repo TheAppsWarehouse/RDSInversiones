@@ -889,12 +889,12 @@ export default function ConfigurationScreen() {
     const hasResolvedBalanzUrl = Boolean(resolvedBalanzUrl);
     const hasAlertDetails = item.alert_details != null && item.alert_details.trim().length > 0;
 
-    const handleBalanzLink = async () => {
+    const handleBalanzLink = () => {
       if (!resolvedBalanzUrl) return;
-      try {
-        const canOpen = await Linking.canOpenURL(resolvedBalanzUrl);
-        if (canOpen) await Linking.openURL(resolvedBalanzUrl);
-      } catch {}
+      // On Android 11+, canOpenURL returns false for https URLs without <queries> in manifest.
+      // Do not gate on canOpenURL — call openURL directly and synchronously so HyperOS
+      // correctly associates the Intent launch with the user's touch event.
+      Linking.openURL(resolvedBalanzUrl).catch(() => {});
     };
 
     const formatPercent = (val: number | null) => {
