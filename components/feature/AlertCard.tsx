@@ -137,11 +137,13 @@ export function AlertCard({
   })();
   const hasResolvedBalanzUrl = Boolean(resolvedBalanzUrl);
 
-  const handleBalanzLink = async () => {
+  const handleBalanzLink = () => {
     if (!resolvedBalanzUrl) return;
-    try {
-      await Linking.openURL(resolvedBalanzUrl);
-    } catch {}
+    // Do NOT use async/await here — on Android (especially Xiaomi HyperOS) the OS
+    // only permits Activity launches that are directly traceable to a user touch event.
+    // Any async gap between the touch and the openURL call can cause the Intent to be
+    // silently blocked by HyperOS's startup manager. Fire-and-forget keeps it synchronous.
+    Linking.openURL(resolvedBalanzUrl).catch(() => {});
   };
 
   // Right-side action buttons count (for padding)
