@@ -21,7 +21,13 @@
       "screenOrientation": "unspecified",
       "privacyPolicy": "https://drive.google.com/file/d/15AxAykjO9dCgbqdI-RCQT_Oydrer5LfC/view?usp=drive_link",
       "softwareKeyboardLayoutMode": "pan",
-      "permissions": ["POST_NOTIFICATIONS"],
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.INTERNET",
+        "android.permission.POST_NOTIFICATIONS",
+        "com.google.android.c2dm.permission.RECEIVE",
+        "theappswarehouse.RDSInversiones.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+      ],
       "blockedPermissions": [
         "android.permission.VIBRATE",
         "android.permission.ACCESS_WIFI_STATE",
