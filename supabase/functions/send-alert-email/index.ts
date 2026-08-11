@@ -223,7 +223,7 @@ function buildHtmlBody(p: AlertPayload): string {
           <div style="margin-top:32px;padding-top:24px;border-top:1px solid #e5e7eb;text-align:center;">
             <p style="margin:0;color:#9ca3af;font-size:12px;">
               This is an automated email from RDS Inversiones.<br>
-              You can disable email notifications in the app's Profile settings.
+              You can disable notifications in the app's Profile settings.
             </p>
           </div>
         </div>
@@ -258,82 +258,87 @@ Deno.serve(async (req) => {
 
     console.log(`Processing ${event} notification for ${ticker} → ${target_accounts}`);
 
-    // ── Step 1: Resolve eligible user profiles ─────────────────────────────────
-    let eligibleEmails: string[] = [];
+    // ── Step 1: Resolve eligible account types from allowed_emails ─────────────
+    //
+    // Scope rules:
+    //   target_accounts = 'Subscribers'  → Affiliate + Admin + Dev only
+    //   target_accounts = 'Free-Accounts' → everyone (Free + Affiliate + Admin + Dev)
+    //
+    // Dev and Admin always receive notifications regardless of target_accounts.
+    // Free users only receive notifications when target_accounts = 'Free-Accounts'.
 
+    let eligibleAccountTypes: string[];
     if (target_accounts === 'Subscribers') {
-      const { data: allowedData, error: allowedError } = await supabaseAdmin
-        .from('allowed_emails')
-        .select('email')
-        .in('account_type', ['Affiliate', 'Admin', 'Dev']);
-
-      if (allowedError) throw new Error(`allowed_emails query failed: ${allowedError.message}`);
-      if (!allowedData || allowedData.length === 0) {
-        return new Response(
-          JSON.stringify({ message: 'No subscriber emails found', emailSent: 0, pushSent: 0 }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
-        );
-      }
-
-      const subscriberEmails = allowedData.map((r: any) => r.email);
-      const { data: profiles, error: profilesError } = await supabaseAdmin
-        .from('user_profiles')
-        .select('email')
-        .in('email', subscriberEmails)
-        .eq('email_notifications_enabled', true);
-
-      if (profilesError) throw new Error(`user_profiles query failed: ${profilesError.message}`);
-      eligibleEmails = (profiles ?? []).map((p: any) => p.email);
-
+      eligibleAccountTypes = ['Affiliate', 'Admin', 'Dev'];
     } else {
-      // Free-Accounts
-      const { data: allowedData } = await supabaseAdmin
-        .from('allowed_emails')
-        .select('email')
-        .in('account_type', ['Affiliate', 'Admin', 'Dev']);
-
-      const subscriberEmails = (allowedData ?? []).map((r: any) => r.email);
-
-      const { data: profiles, error: profilesError } = await supabaseAdmin
-        .from('user_profiles')
-        .select('email')
-        .not('email', 'in', `(${subscriberEmails.map((e: string) => `"${e}"`).join(',')})`)
-        .eq('email_notifications_enabled', true);
-
-      if (profilesError) throw new Error(`user_profiles query (free) failed: ${profilesError.message}`);
-      eligibleEmails = (profiles ?? []).map((p: any) => p.email);
+      // 'Free-Accounts' — all account types
+      eligibleAccountTypes = ['Free', 'Affiliate', 'Admin', 'Dev'];
     }
 
-    if (eligibleEmails.length === 0) {
+    // Fetch all allowed emails matching the eligible account types
+    const { data: allowedData, error: allowedError } = await supabaseAdmin
+      .from('allowed_emails')
+      .select('email')
+      .in('account_type', eligibleAccountTypes);
+
+    if (allowedError) {
+      throw new Error(`allowed_emails query failed: ${allowedError.message}`);
+    }
+
+    const candidateEmails: string[] = (allowedData ?? []).map((r: any) => r.email);
+
+    if (candidateEmails.length === 0) {
       return new Response(
-        JSON.stringify({ message: 'No recipients to notify', emailSent: 0, pushSent: 0 }),
+        JSON.stringify({ message: 'No candidate emails found', emailSent: 0, pushSent: 0 }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
       );
     }
 
-    // ── Step 2: Resolve eligible user IDs for push token lookup ───────────────
-    const { data: profilesById, error: profilesByIdError } = await supabaseAdmin
+    // ── Step 2: Filter by notification preference AND registered profile ────────
+    //
+    // Only users who have:
+    //   1. A registered user_profile (i.e. have logged in at least once)
+    //   2. email_notifications_enabled = true (have not opted out)
+    //
+    const { data: profilesData, error: profilesError } = await supabaseAdmin
       .from('user_profiles')
       .select('id, email')
-      .in('email', eligibleEmails);
+      .in('email', candidateEmails)
+      .eq('email_notifications_enabled', true);
 
-    if (profilesByIdError) {
-      console.error('Failed to fetch user ids:', profilesByIdError.message);
+    if (profilesError) {
+      throw new Error(`user_profiles query failed: ${profilesError.message}`);
     }
 
-    const userIds = (profilesById ?? []).map((p: any) => p.id);
+    const eligibleProfiles: Array<{ id: string; email: string }> = profilesData ?? [];
+    const eligibleEmails: string[] = eligibleProfiles.map((p) => p.email);
+    const eligibleUserIds: string[] = eligibleProfiles.map((p) => p.id);
 
-    // ── Step 3: Fetch push tokens — filter by watchlist for updated/closed ──────
+    console.log(`Eligible recipients: ${eligibleProfiles.length} (from ${candidateEmails.length} candidates)`);
+
+    if (eligibleProfiles.length === 0) {
+      return new Response(
+        JSON.stringify({ message: 'No recipients to notify (all opted out or not registered)', emailSent: 0, pushSent: 0 }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      );
+    }
+
+    // ── Step 3: Resolve push tokens ────────────────────────────────────────────
+    //
+    // created  → send to ALL eligible users (broadcast within scope)
+    // updated / closed → send only to eligible users who have this alert in watchlist
+
     let pushTokens: string[] = [];
-    if (userIds.length > 0) {
-      if (payload.event === 'updated' || payload.event === 'closed') {
-        // Only send to users who have this alert in their watchlist
+
+    if (eligibleUserIds.length > 0) {
+      if (event === 'updated' || event === 'closed') {
+        // Narrow to watchlist members for this specific alert
         if (payload.alert_id) {
           const { data: watchlistRows, error: watchlistError } = await supabaseAdmin
             .from('watchlist')
             .select('user_id')
             .eq('alert_id', payload.alert_id)
-            .in('user_id', userIds);
+            .in('user_id', eligibleUserIds);
 
           if (watchlistError) {
             console.error('Failed to fetch watchlist users:', watchlistError.message);
@@ -354,11 +359,11 @@ Deno.serve(async (req) => {
           }
         }
       } else {
-        // 'created' event: send to ALL eligible users
+        // 'created' event — broadcast to all eligible users
         const { data: tokenRows, error: tokenError } = await supabaseAdmin
           .from('push_tokens')
           .select('token')
-          .in('user_id', userIds);
+          .in('user_id', eligibleUserIds);
 
         if (tokenError) {
           console.error('Failed to fetch push tokens:', tokenError.message);
@@ -367,6 +372,8 @@ Deno.serve(async (req) => {
         }
       }
     }
+
+    console.log(`Push tokens resolved: ${pushTokens.length}`);
 
     // ── Step 4: Send remote push notifications (HIGH priority) ─────────────────
     const pushTitle = buildPushTitle(event, ticker);
