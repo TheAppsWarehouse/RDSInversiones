@@ -208,59 +208,6 @@ export const alertService = {
     return { error: error ? error.message : null };
   },
 
-  // ─── Batch Import ─────────────────────────────────────────────────────────────
-
-  async batchImportAlerts(
-    rows: CreateAlertPayload[]
-  ): Promise<{ successCount: number; failedCount: number; errors: string[] }> {
-    let successCount = 0;
-    let failedCount = 0;
-    const errors: string[] = [];
-    const now = new Date().toISOString();
-
-    for (const row of rows) {
-      const hasARS = row.entry_price_ars != null;
-      const hasUSD = row.entry_price_usd != null;
-      let legacyMarket = 'EEUU';
-      if (hasARS && !hasUSD) legacyMarket = 'ARG';
-
-      const { error } = await supabase.from('alerts').insert({
-        ticker: row.ticker.toUpperCase().trim(),
-        market: legacyMarket,
-        term: row.term ?? 'Short',
-        target_accounts: row.target_accounts,
-        alert_condition: 'Current',
-        opening_date: now,
-        action: null,
-        entry_price_ars: row.entry_price_ars,
-        re_entry_price_ars: row.re_entry_price_ars,
-        entry_price_usd: row.entry_price_usd,
-        re_entry_price_usd: row.re_entry_price_usd,
-        entry_price: row.entry_price_usd ?? row.entry_price_ars,
-        re_entry_price: row.re_entry_price_usd ?? row.re_entry_price_ars,
-        short_term_goal: row.short_term_goal,
-        long_term_goal: row.long_term_goal,
-        three_months_goal: row.short_term_goal,
-        action_conservative: row.action_conservative,
-        action_moderate: row.action_moderate,
-        action_aggressive: row.action_aggressive,
-        action_ultra_aggressive: row.action_ultra_aggressive,
-        balanz_url: row.balanz_url,
-        alert_details: row.alert_details,
-        alert_detail_en: row.alert_detail_en,
-        created_at: now,
-      });
-
-      if (error) {
-        failedCount++;
-        errors.push(`${row.ticker}: ${error.message}`);
-      } else {
-        successCount++;
-      }
-    }
-
-    return { successCount, failedCount, errors };
-  },
 };
 
 // ─── Calculation Helpers ───────────────────────────────────────────────────────
@@ -345,16 +292,6 @@ export function calculateElapsedDays(alert: Alert): number {
   return Math.floor((end - start) / (1000 * 60 * 60 * 24));
 }
 
-export function formatElapsed(days: number): string {
-  if (days < 1) return '< 1 day';
-  if (days === 1) return '1 day';
-  if (days < 30) return `${days} days`;
-  const months = Math.floor(days / 30);
-  const rem = days % 30;
-  if (rem === 0) return `${months} mo.`;
-  return `${months} mo. ${rem} d.`;
-}
-
 // ─── Currency Helper ──────────────────────────────────────────────────────────
 
 export function formatPriceARS(val: number | null): string {
@@ -365,12 +302,6 @@ export function formatPriceARS(val: number | null): string {
 export function formatPriceUSD(val: number | null): string {
   if (val == null) return '-';
   return `US$ ${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-export function formatPrice(val: number | null, market: 'EEUU' | 'ARG' = 'EEUU'): string {
-  if (val == null) return '-';
-  if (market === 'ARG') return formatPriceARS(val);
-  return formatPriceUSD(val);
 }
 
 /**
