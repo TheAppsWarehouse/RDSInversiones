@@ -21,7 +21,6 @@ import { MaterialIcons } from '@expo/vector-icons';
 import {
   alertService,
   calculateYieldForMarket,
-  calculateElapsedDays,
   formatPriceARS,
   formatPriceUSD,
   getAlertMarkets,
