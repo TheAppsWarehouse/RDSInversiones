@@ -17,8 +17,6 @@ import { Alert, AlertCondition, ProfileAction } from '@/types/stock';
 import {
   formatPriceARS,
   formatPriceUSD,
-  formatElapsed,
-  calculateElapsedDays,
   calculateYieldForMarket,
   getAlertMarkets,
 } from '@/services/alertService';
@@ -67,10 +65,6 @@ export function AlertCard({
   }
 
   // Determine which market blocks to show based on filter
-  const showARS = hasARS && (marketFilter === 'ALL' || marketFilter === 'ARG');
-  const showUSD = hasUSD && (marketFilter === 'ALL' || marketFilter === 'EEUU');
-
-  // If filter doesn't match any available market, show both
   const effectiveShowARS = hasARS && (!hasUSD || marketFilter === 'ARG' || marketFilter === 'ALL');
   const effectiveShowUSD = hasUSD && (!hasARS || marketFilter === 'EEUU' || marketFilter === 'ALL');
 
@@ -111,7 +105,6 @@ export function AlertCard({
     }
   };
 
-  const elapsedDays = calculateElapsedDays(item);
   const arsYield = calculateYieldForMarket(item, 'ARS');
   const usdYield = calculateYieldForMarket(item, 'USD');
 
