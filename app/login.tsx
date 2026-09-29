@@ -152,7 +152,9 @@ export default function LoginScreen() {
       }
 
       if (isPrivileged) {
-        registerPushToken(newUser.id).catch(() => {});
+        registerPushToken(newUser.id).catch((err) => {
+          console.error('[login] registerPushToken failed (privileged new user):', err);
+        });
         router.replace('/(tabs)');
       } else {
         // Show Risk Profile questionnaire for non-privileged accounts
@@ -184,7 +186,11 @@ export default function LoginScreen() {
     const { profile } = calculateRiskProfile(rpAnswers);
     await saveRiskProfile(registeredUser.id, profile);
     setRpSubmitting(false);
-    if (registeredUser?.id) registerPushToken(registeredUser.id).catch(() => {});
+    if (registeredUser?.id) {
+      registerPushToken(registeredUser.id).catch((err) => {
+        console.error('[login] registerPushToken failed (after risk profile):', err);
+      });
+    }
     setRpResultProfile(profile);
     setRpShowResult(true);
   };
@@ -242,7 +248,9 @@ export default function LoginScreen() {
     if (error) { showAlert('Error', error); return; }
 
     if (user) {
-      registerPushToken(user.id).catch(() => {});
+      registerPushToken(user.id).catch((err) => {
+        console.error('[login] registerPushToken failed (standard login):', err);
+      });
       router.replace('/(tabs)');
     }
   };
@@ -261,7 +269,9 @@ export default function LoginScreen() {
     if (error) { showAlert('Error', error); return; }
 
     if (user) {
-      registerPushToken(user.id).catch(() => {});
+      registerPushToken(user.id).catch((err) => {
+        console.error('[login] registerPushToken failed (privileged OTP login):', err);
+      });
       router.replace('/(tabs)');
     }
   };
