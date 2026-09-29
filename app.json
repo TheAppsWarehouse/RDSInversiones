@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "RDS Inversiones",
-    "slug": "theappswarehouserdsinversionesapp",
+    "name": "onspace-app",
+    "slug": "onspace-app",
     "version": "1.1.2",
     "orientation": "default",
     "icon": "./assets/images/logo.png",
@@ -127,7 +127,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "theappswarehouserdsinversionesapp"
+        "projectId": "__REPLACE_WITH_EAS_PROJECT_ID__"
       }
     }
   }

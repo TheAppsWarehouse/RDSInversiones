@@ -213,3 +213,29 @@ export async function recordTermsAcceptance(
     return null;
   }
 }
+
+/**
+ * Fetch full acceptance history for a user (all versions ever accepted).
+ * Useful for audit / admin views.
+ */
+export async function getUserAcceptanceHistory(userId: string): Promise<
+  Array<TcAcceptance & { tc_versions: TcVersion }>
+> {
+  try {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from('tc_acceptances')
+      .select('*, tc_versions(*)')
+      .eq('user_id', userId)
+      .order('accepted_at', { ascending: false });
+
+    if (error) {
+      console.error('termsService.getUserAcceptanceHistory error:', error.message);
+      return [];
+    }
+    return (data ?? []) as Array<TcAcceptance & { tc_versions: TcVersion }>;
+  } catch (err) {
+    console.error('termsService.getUserAcceptanceHistory exception:', err);
+    return [];
+  }
+}
