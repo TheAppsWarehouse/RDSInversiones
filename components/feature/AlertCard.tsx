@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { memo, useState } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   ScrollView,
   Linking,
 } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useLanguage } from '@/hooks/useLanguage';
@@ -27,16 +27,16 @@ interface AlertCardProps {
   canWatchlist?: boolean;
   isInWatchlist?: boolean;
   isTogglingWatchlist?: boolean;
-  onWatchlistToggle?: () => void;
+  onWatchlistToggle?: (alertId: string) => void;
   // Remove (watchlist screen)
   showRemoveBtn?: boolean;
   isRemoving?: boolean;
-  onRemove?: () => void;
+  onRemove?: (alert: Alert) => void;
   // Market preference
   marketFilter?: 'EEUU' | 'ARG' | 'ALL';
 }
 
-export function AlertCard({
+export const AlertCard = memo(function AlertCard({
   item,
   canWatchlist = false,
   isInWatchlist = false,
@@ -149,7 +149,7 @@ export function AlertCard({
       {showRemoveBtn && (
         <TouchableOpacity
           style={[styles.actionBtn, styles.removeBtnPos, { backgroundColor: `${colors.error}15` }]}
-          onPress={onRemove}
+          onPress={() => onRemove?.(item)}
           disabled={isRemoving}
           hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
         >
@@ -172,7 +172,7 @@ export function AlertCard({
               borderWidth: 1,
             },
           ]}
-          onPress={onWatchlistToggle}
+          onPress={() => onWatchlistToggle?.(item.id)}
           disabled={isTogglingWatchlist}
           hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
         >
@@ -390,8 +390,8 @@ export function AlertCard({
         </View>
       </View>
 
-      {/* ── Alert Details Modal ── */}
-      <Modal
+      {/* Mount the details tree only while open, rather than once per rendered card. */}
+      {detailsModalVisible ? <Modal
         visible={detailsModalVisible}
         transparent
         animationType="slide"
@@ -417,10 +417,10 @@ export function AlertCard({
             </ScrollView>
           </View>
         </View>
-      </Modal>
+      </Modal> : null}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: {

@@ -8,6 +8,7 @@
     "scheme": "onspaceapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "jsEngine": "hermes",
     "ios": {
       "supportsTablet": true
     },
@@ -85,8 +86,6 @@
         "android.permission.USE_FINGERPRINT",
         "com.google.android.gms.permission.AD_ID"
       ],
-      "enableProguardInReleaseBuilds": true,
-      "enableShrinkResourcesInReleaseBuilds": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/logo.png",
         "backgroundColor": "#ffffff"
@@ -120,7 +119,8 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "./plugins/withAndroidReleaseOptimization.js"
     ],
     "experiments": {
       "typedRoutes": true

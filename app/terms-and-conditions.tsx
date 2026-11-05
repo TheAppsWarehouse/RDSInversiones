@@ -12,7 +12,7 @@ import { CURRENT_TERMS_VERSION } from '@/contexts/LanguageContext';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/template';
 import { recordTermsAcceptance } from '@/services/termsService';

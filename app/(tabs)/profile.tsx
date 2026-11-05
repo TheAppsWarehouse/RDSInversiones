@@ -17,7 +17,7 @@ import { FunctionsHttpError } from '@supabase/supabase-js';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { router } from 'expo-router';
 import { useLanguage } from '@/hooks/useLanguage';
 import { useAccountType } from '@/hooks/useAccountType';

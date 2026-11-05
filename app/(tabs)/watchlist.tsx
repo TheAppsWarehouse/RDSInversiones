@@ -12,12 +12,14 @@ import { useAuth, useAlert } from '@/template';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { watchlistService, WatchlistItem } from '@/services/watchlistService';
 import { useWatchlist } from '@/contexts/WatchlistContext';
 import { useLanguage } from '@/hooks/useLanguage';
 import { useAccountType } from '@/hooks/useAccountType';
 import { AlertCard } from '@/components/feature/AlertCard';
+import type { Alert } from '@/types/stock';
+import { alertListRendering } from '@/constants/performance';
 
 export default function WatchlistScreen() {
   const { user } = useAuth();
@@ -50,12 +52,12 @@ export default function WatchlistScreen() {
     }, [loadData])
   );
 
-  const handleRemove = async (item: WatchlistItem) => {
-    setRemovingId(item.id);
-    await removeFromWatchlist(item.alert_id);
+  const handleRemove = useCallback(async (alert: Alert) => {
+    setRemovingId(alert.id);
+    await removeFromWatchlist(alert.id);
     await loadData();
     setRemovingId(null);
-  };
+  }, [removeFromWatchlist, loadData]);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -100,6 +102,7 @@ export default function WatchlistScreen() {
         </View>
       ) : (
         <FlatList
+          {...alertListRendering}
           data={items}
           renderItem={({ item }) => {
             if (!item.alert) return null;
@@ -107,8 +110,8 @@ export default function WatchlistScreen() {
               <AlertCard
                 item={item.alert}
                 showRemoveBtn={true}
-                isRemoving={removingId === item.id}
-                onRemove={() => handleRemove(item)}
+                isRemoving={removingId === item.alert_id}
+                onRemove={handleRemove}
                 marketFilter={marketFilter}
               />
             );

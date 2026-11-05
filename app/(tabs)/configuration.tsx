@@ -17,7 +17,7 @@ import { useAuth, useAlert } from '@/template';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import {
   alertService,
   calculateYieldForMarket,
@@ -41,6 +41,8 @@ import { router } from 'expo-router';
 import { useAccountType } from '@/hooks/useAccountType';
 import { useLanguage } from '@/hooks/useLanguage';
 import { exportToExcel, importFromExcel } from '@/services/excelService';
+import { useSortedAlerts } from '@/hooks/useSortedAlerts';
+import { alertListRendering, compactListRendering } from '@/constants/performance';
 
 type SortType = 'newestFirst' | 'oldestFirst' | 'alphabetAZ' | 'alphabetZA' | 'currentFirst' | 'closedFirst';
 type ActiveTab = 'alerts' | 'names' | 'accounts';
@@ -76,7 +78,6 @@ export default function ConfigurationScreen() {
 
   // ─── Alerts state ──────────────────────────────────────────────────────────
   const [alerts, setAlerts] = useState<AlertType[]>([]);
-  const [displayAlerts, setDisplayAlerts] = useState<AlertType[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortType, setSortType] = useState<SortType>('newestFirst');
   const [showSortMenu, setShowSortMenu] = useState(false);
@@ -182,9 +183,7 @@ export default function ConfigurationScreen() {
     if (activeTab === 'accounts') loadAccounts();
   }, [activeTab]);
 
-  useEffect(() => {
-    applySort(sortType);
-  }, [alerts, sortType, alertSearch]);
+  const displayAlerts = useSortedAlerts({ alerts, sortType, search: alertSearch });
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -211,30 +210,6 @@ export default function ConfigurationScreen() {
     setLoading(false);
     setRefreshing(false);
   }, []);
-
-  const applySort = (type: SortType) => {
-    const q = alertSearch.trim().toLowerCase();
-    const filtered = q
-      ? alerts.filter(
-          (a) =>
-            a.ticker.toLowerCase().includes(q) ||
-            (a.ticker_name ?? '').toLowerCase().includes(q)
-        )
-      : alerts;
-
-    const sorted = [...filtered].sort((a, b) => {
-      switch (type) {
-        case 'alphabetAZ': return a.ticker.localeCompare(b.ticker);
-        case 'alphabetZA': return b.ticker.localeCompare(a.ticker);
-        case 'newestFirst': return new Date(b.opening_date).getTime() - new Date(a.opening_date).getTime();
-        case 'oldestFirst': return new Date(a.opening_date).getTime() - new Date(b.opening_date).getTime();
-        case 'currentFirst': return a.alert_condition === 'Current' ? -1 : 1;
-        case 'closedFirst': return a.alert_condition === 'Closed' ? -1 : 1;
-        default: return 0;
-      }
-    });
-    setDisplayAlerts(sorted);
-  };
 
   const resetCreateForm = () => {
     setNewTicker('');
@@ -280,7 +255,7 @@ export default function ConfigurationScreen() {
       re_entry_price_usd: newReEntryPriceUSD ? parseFloat(newReEntryPriceUSD) : null,
       short_term_goal: newShortTermGoal ? parseFloat(newShortTermGoal) : null,
       long_term_goal: newLongTermGoal ? parseFloat(newLongTermGoal) : null,
-
+      balanz_url: null,
       alert_details: newAlertDetails.trim() || null,
       alert_detail_en: newAlertDetailEn.trim() || null,
     };
@@ -1419,6 +1394,7 @@ export default function ConfigurationScreen() {
           </ScrollView>
         ) : (
           <FlatList
+            {...alertListRendering}
             data={displayAlerts}
             renderItem={renderAlertItem}
             keyExtractor={(item) => item.id}
@@ -1443,7 +1419,7 @@ export default function ConfigurationScreen() {
               <Text style={[styles.emptyTitle, { color: colors.text }]}>{t('noTickerNames')}</Text>
             </ScrollView>
           ) : (
-            <FlatList data={filtered} renderItem={renderNameItem} keyExtractor={(item) => item.id}
+            <FlatList {...compactListRendering} data={filtered} renderItem={renderNameItem} keyExtractor={(item) => item.id}
               contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />} />
           );
@@ -1465,7 +1441,7 @@ export default function ConfigurationScreen() {
               <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>{t('addAccountsToStart')}</Text>
             </ScrollView>
           ) : (
-            <FlatList data={filtered} renderItem={renderAccountItem} keyExtractor={(item) => item.id}
+            <FlatList {...compactListRendering} data={filtered} renderItem={renderAccountItem} keyExtractor={(item) => item.id}
               contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />} />
           );

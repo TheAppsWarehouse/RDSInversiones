@@ -14,11 +14,13 @@ import { useAuth, useAlert } from '@/template';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { alertService, calculateYield } from '@/services/alertService';
 import { Alert } from '@/types/stock';
 import { useLanguage } from '@/hooks/useLanguage';
 import { useAccountType } from '@/hooks/useAccountType';
+import { useSortedAlerts } from '@/hooks/useSortedAlerts';
+import { compactListRendering } from '@/constants/performance';
 
 type SortType = 'newestClose' | 'oldestClose' | 'alphabetAZ' | 'alphabetZA' | 'yieldHigh' | 'yieldLow';
 
@@ -33,7 +35,6 @@ export default function PerformanceScreen() {
   const isSubscriber = accountType === 'Affiliate' || accountType === 'Admin' || accountType === 'Dev';
 
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [displayAlerts, setDisplayAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
@@ -59,49 +60,7 @@ export default function PerformanceScreen() {
     }, [loadData])
   );
 
-  React.useEffect(() => {
-    applySort(sortType);
-  }, [alerts, sortType, search]);
-
-  const applySort = (type: SortType) => {
-    const q = search.trim().toLowerCase();
-    const filtered = q
-      ? alerts.filter(
-          (a) =>
-            a.ticker.toLowerCase().includes(q) ||
-            (a.ticker_name ?? '').toLowerCase().includes(q)
-        )
-      : alerts;
-
-    const sorted = [...filtered].sort((a, b) => {
-      switch (type) {
-        case 'alphabetAZ': return a.ticker.localeCompare(b.ticker);
-        case 'alphabetZA': return b.ticker.localeCompare(a.ticker);
-        case 'newestClose': {
-          const aDate = a.closing_date ? new Date(a.closing_date).getTime() : 0;
-          const bDate = b.closing_date ? new Date(b.closing_date).getTime() : 0;
-          return bDate - aDate;
-        }
-        case 'oldestClose': {
-          const aDate = a.closing_date ? new Date(a.closing_date).getTime() : 0;
-          const bDate = b.closing_date ? new Date(b.closing_date).getTime() : 0;
-          return aDate - bDate;
-        }
-        case 'yieldHigh': {
-          const ay = calculateYield(a) ?? -Infinity;
-          const by = calculateYield(b) ?? -Infinity;
-          return by - ay;
-        }
-        case 'yieldLow': {
-          const ay = calculateYield(a) ?? Infinity;
-          const by = calculateYield(b) ?? Infinity;
-          return ay - by;
-        }
-        default: return 0;
-      }
-    });
-    setDisplayAlerts(sorted);
-  };
+  const displayAlerts = useSortedAlerts({ alerts, sortType, search });
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -265,6 +224,7 @@ export default function PerformanceScreen() {
         </View>
       ) : (
         <FlatList
+          {...compactListRendering}
           data={displayAlerts}
           renderItem={renderItem}
           keyExtractor={(item) => item.id}

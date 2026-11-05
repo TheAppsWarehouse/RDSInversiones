@@ -1,8 +1,13 @@
 /**
  * excelService.native.ts
  * Native (iOS/Android) implementation using xlsx + expo-file-system + expo-sharing.
+ * Spreadsheet code is evaluated only on an import/export action. Metro still bundles it.
  */
-import * as XLSX from 'xlsx';
+type SpreadsheetModule = typeof import('xlsx');
+function loadSpreadsheetModule(): SpreadsheetModule {
+  // Deliberately inside a function: native Metro does not split production chunks.
+  return require('xlsx') as SpreadsheetModule;
+}
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
@@ -12,6 +17,7 @@ export async function exportToExcel(
   rows: Record<string, any>[],
   filename: string
 ): Promise<void> {
+  const XLSX = loadSpreadsheetModule();
   const fallback = rows.length > 0 ? rows : [{}];
   const ws = XLSX.utils.json_to_sheet(fallback);
   const wb = XLSX.utils.book_new();
@@ -36,6 +42,7 @@ export async function importFromExcel(): Promise<any[][] | null> {
     copyToCacheDirectory: true,
   });
   if (result.canceled) return null;
+  const XLSX = loadSpreadsheetModule();
   const fileContent = await FileSystem.readAsStringAsync(result.assets[0].uri, {
     encoding: FileSystem.EncodingType.Base64,
   });

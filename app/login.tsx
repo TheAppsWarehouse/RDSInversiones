@@ -15,7 +15,7 @@ import { useAuth, useAlert, getSupabaseClient } from '@/template';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { accountService } from '@/services/accountService';
 import { useLanguage } from '@/hooks/useLanguage';

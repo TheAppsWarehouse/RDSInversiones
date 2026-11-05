@@ -4,13 +4,13 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
+  FlatList,
   Linking,
 } from 'react-native';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
 import { useLanguage } from '@/hooks/useLanguage';
 
@@ -25,12 +25,7 @@ interface ExtraItem {
   url: string;
 }
 
-export default function ExtrasScreen() {
-  const insets = useSafeAreaInsets();
-  const { t, language } = useLanguage();
-  const { colors } = useTheme();
-
-  const extras: ExtraItem[] = [
+const extras: ExtraItem[] = [
     {
       id: '1',
       name: 'Financial Freedom Planner',
@@ -87,7 +82,12 @@ export default function ExtrasScreen() {
       imageUri: 'https://drive.google.com/thumbnail?id=16HAY_e0JlWpe00Ev0kZgyLdCE7RVf1tf&sz=w500',
       url: 'https://www.youtube.com/@RDSinversiones',
     },
-  ];
+];
+
+export default function ExtrasScreen() {
+  const insets = useSafeAreaInsets();
+  const { t } = useLanguage();
+  const { colors } = useTheme();
 
   const handlePress = async (item: ExtraItem) => {
     try {
@@ -100,7 +100,7 @@ export default function ExtrasScreen() {
     }
   };
 
-  const renderCard = (item: ExtraItem) => (
+  const renderCard = ({ item }: { item: ExtraItem }) => (
     <TouchableOpacity
       key={item.id}
       style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
@@ -113,6 +113,7 @@ export default function ExtrasScreen() {
             source={{ uri: item.imageUri }}
             style={[styles.logo, { backgroundColor: colors.card }]}
             contentFit="cover"
+            cachePolicy="disk"
             transition={200}
           />
         ) : (
@@ -152,14 +153,17 @@ export default function ExtrasScreen() {
         <MaterialIcons name="explore" size={28} color={colors.primary} />
       </View>
 
-      <ScrollView
+      <FlatList
+        data={extras}
+        renderItem={renderCard}
+        keyExtractor={(item) => item.id}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.list}>
-          {extras.map((item) => renderCard(item))}
-        </View>
-      </ScrollView>
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={5}
+      />
     </View>
   );
 }
@@ -186,8 +190,8 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     paddingBottom: 100,
   },
-  list: {
-    gap: spacing.sm,
+  separator: {
+    height: spacing.sm,
   },
   card: {
     flexDirection: 'row',

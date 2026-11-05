@@ -14,13 +14,15 @@ import { useAuth, useAlert } from '@/template';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MaterialIcons } from '@expo/vector-icons';
-import { alertService, getAlertMarkets } from '@/services/alertService';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { alertService } from '@/services/alertService';
 import { Alert } from '@/types/stock';
 import { useLanguage } from '@/hooks/useLanguage';
 import { useAccountType } from '@/hooks/useAccountType';
 import { useWatchlist } from '@/contexts/WatchlistContext';
 import { AlertCard } from '@/components/feature/AlertCard';
+import { useSortedAlerts } from '@/hooks/useSortedAlerts';
+import { alertListRendering } from '@/constants/performance';
 
 type SortType = 'newestFirst' | 'oldestFirst' | 'alphabetAZ' | 'alphabetZA' | 'currentFirst' | 'closedFirst';
 
@@ -37,7 +39,6 @@ export default function AlertsScreen() {
   const canWatchlist = accountType === 'Free' || accountType === 'Affiliate';
 
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [displayAlerts, setDisplayAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sortType, setSortType] = useState<SortType>('newestFirst');
@@ -71,50 +72,14 @@ export default function AlertsScreen() {
     }, [loadData, canWatchlist])
   );
 
-  React.useEffect(() => {
-    applySort(sortType);
-  }, [alerts, sortType, search, marketFilter]);
-
-  const applySort = (type: SortType) => {
-    const q = search.trim().toLowerCase();
-
-    const searched = q
-      ? alerts.filter(
-          (a) =>
-            a.ticker.toLowerCase().includes(q) ||
-            (a.ticker_name ?? '').toLowerCase().includes(q)
-        )
-      : alerts;
-
-    const filtered = searched.filter((alert) => {
-      const { hasARS, hasUSD } = getAlertMarkets(alert);
-
-      if (marketFilter === 'ARG') return hasARS;
-      if (marketFilter === 'EEUU') return hasUSD;
-
-      return true;
-    });
-
-    const sorted = [...filtered].sort((a, b) => {
-      switch (type) {
-        case 'alphabetAZ': return a.ticker.localeCompare(b.ticker);
-        case 'alphabetZA': return b.ticker.localeCompare(a.ticker);
-        case 'newestFirst': return new Date(b.opening_date).getTime() - new Date(a.opening_date).getTime();
-        case 'oldestFirst': return new Date(a.opening_date).getTime() - new Date(b.opening_date).getTime();
-        case 'currentFirst': return a.alert_condition === 'Current' ? -1 : 1;
-        case 'closedFirst': return a.alert_condition === 'Closed' ? -1 : 1;
-        default: return 0;
-      }
-    });
-    setDisplayAlerts(sorted);
-  };
+  const displayAlerts = useSortedAlerts({ alerts, sortType, search, marketFilter });
 
   const handleRefresh = () => {
     setRefreshing(true);
     loadData();
   };
 
-  const handleWatchlistToggle = async (alertId: string) => {
+  const handleWatchlistToggle = useCallback(async (alertId: string) => {
     setTogglingWatchlist(alertId);
     if (isInWatchlist(alertId)) {
       await removeFromWatchlist(alertId);
@@ -122,7 +87,7 @@ export default function AlertsScreen() {
       await addToWatchlist(alertId);
     }
     setTogglingWatchlist(null);
-  };
+  }, [isInWatchlist, removeFromWatchlist, addToWatchlist]);
 
   const sortOptions: { key: SortType; label: string }[] = [
     { key: 'newestFirst', label: t('newestFirst') },
@@ -205,6 +170,7 @@ export default function AlertsScreen() {
         </View>
       ) : (
         <FlatList
+          {...alertListRendering}
           data={displayAlerts}
           renderItem={({ item }) => (
             <AlertCard
@@ -212,7 +178,7 @@ export default function AlertsScreen() {
               canWatchlist={canWatchlist}
               isInWatchlist={isInWatchlist(item.id)}
               isTogglingWatchlist={togglingWatchlist === item.id}
-              onWatchlistToggle={() => handleWatchlistToggle(item.id)}
+              onWatchlistToggle={handleWatchlistToggle}
               marketFilter={marketFilter}
             />
           )}

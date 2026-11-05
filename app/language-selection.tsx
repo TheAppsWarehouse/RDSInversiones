@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useLanguage } from '@/hooks/useLanguage';
 
 export default function LanguageSelectionScreen() {
