@@ -13,10 +13,20 @@ const releaseFlags = {
   'android.enableShrinkResourcesInReleaseBuilds': 'true',
 };
 
+// Request diagnostics through project properties because OnSpace controls the
+// Gradle command line. CLI options may override these settings, and the cloud
+// build UI may still truncate output. Do not use debug logging: it can expose
+// credentials. These settings diagnose failures; they do not suppress R8 errors.
+const diagnosticProperties = {
+  'org.gradle.logging.stacktrace': 'all',
+  'org.gradle.warning.mode': 'all',
+};
+const managedProperties = { ...releaseFlags, ...diagnosticProperties };
+
 function configureReleaseProperties(properties) {
   const preserved = properties.filter((entry) => entry.type !== 'property'
-    || !Object.prototype.hasOwnProperty.call(releaseFlags, entry.key));
-  return preserved.concat(Object.entries(releaseFlags).map(([key, value]) => ({
+    || !Object.prototype.hasOwnProperty.call(managedProperties, entry.key));
+  return preserved.concat(Object.entries(managedProperties).map(([key, value]) => ({
     type: 'property', key, value,
   })));
 }

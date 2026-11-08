@@ -87,6 +87,28 @@ Verify generated `android/gradle.properties` has the Proguard/Minify and resourc
 
 Open the release APK/AAB in Android Studio **Build > Analyze APK**. Compare compressed/uncompressed classes*.dex sizes, defined/referenced method counts, resources, assets/Hermes bundles, and ABI-specific .so libraries. For an AAB, compare equivalent device-specific APKs/Play delivery estimates rather than treating total AAB bytes as a device's download size. Use production signing in the actual release build; this session did not change signing, ABIs, SDK levels, or application permissions.
 
+## OnSpace R8 failure diagnostics
+
+The reported `:app:minifyReleaseWithR8 > Compilation failed to complete` identifies the failed task, not its cause. The Gradle 9 deprecation summary is a separate warning; it does not justify upgrading the build toolchain or suppressing R8 diagnostics. The supplied build scan at https://gradle.com/s/vgz4hl6c6ecpi returned no readable content to this editor, so no underlying exception could be inspected.
+
+The registered release plugin now writes these standard Gradle properties during Android prebuild:
+
+```properties
+org.gradle.logging.stacktrace=all
+org.gradle.warning.mode=all
+```
+
+These request the equivalent of `--stacktrace --warning-mode all` without needing control of OnSpace's build command. R8 shrinking, optimization, obfuscation, resource shrinking, existing application rules, dependency consumer rules, and JVM memory settings remain unchanged. Debug logging is not enabled. No blanket keep rules or warning suppression were added. Fixture coverage was added for property deduplication, idempotence, and JVM-setting preservation; the tests and Android builds could not be executed in this editor.
+
+Next steps:
+
+1. Run a new Android AAB build in OnSpace that applies native prebuild. Existing binaries and logs are unaffected.
+2. Share the first `ERROR: R8` / `Missing class` diagnostic and the relevant nested `Caused by` exception, rather than only the final failure summary. If available, include `android/app/build/outputs/mapping/release/missing_rules.txt` from that failed build. It is a diagnostic artifact, not a valid release mapping; do not apply its rules blindly.
+3. If the preview still displays only the same short summary, open the build scan's console output in your browser or email contact@onspace.ai with the build ID/timestamp and request the complete R8 log. Command-line settings can override project properties, and the cloud UI can truncate logs; the plugin cannot control either.
+4. Apply a targeted fix only after identifying the failure: resolve the specific missing dependency/consumer rule, investigate the reported R8 internal exception against the supported Expo toolchain, or address memory settings only if an out-of-memory exception is present.
+
+This change enables diagnosis; it does **not** establish or fix the original R8 root cause. A successful minified release build is still required to validate any subsequent fix and generate its matching `mapping.txt`.
+
 ## Release behavior and memory checks
 
 Test an installed R8-enabled release build on representative Android devices, including a lower-memory device. Live Preview cannot validate R8/JNI/FCM behavior.
@@ -104,4 +126,5 @@ If the smaller render window produces blank areas during fast scrolling on a tar
 
 - https://docs.expo.dev/guides/analyzing-bundles/
 - https://docs.expo.dev/config-plugins/plugins/
+- https://docs.gradle.org/current/userguide/logging.html
 - https://raw.githubusercontent.com/expo/expo/sdk-53/templates/expo-template-bare-minimum/android/app/build.gradle

@@ -21,6 +21,26 @@ test('enables shrinking and obfuscation without deleting unrelated Gradle proper
   assert.equal(existing[2].value, 'false');
 });
 
+test('requests cloud-build diagnostics without disabling R8 or overwriting JVM settings', () => {
+  const existing = [
+    { type: 'property', key: 'org.gradle.jvmargs', value: '-Xmx2048m -XX:MaxMetaspaceSize=512m' },
+    { type: 'property', key: 'org.gradle.logging.stacktrace', value: 'internal' },
+    { type: 'property', key: 'org.gradle.logging.stacktrace', value: 'full' },
+    { type: 'property', key: 'org.gradle.warning.mode', value: 'summary' },
+  ];
+  const configured = configureReleaseProperties(existing);
+  for (const key of ['org.gradle.logging.stacktrace', 'org.gradle.warning.mode']) {
+    assert.equal(configured.filter((entry) => entry.key === key).length, 1);
+    assert.equal(configured.find((entry) => entry.key === key).value, 'all');
+  }
+  assert.equal(configured.find((entry) => entry.key === 'org.gradle.jvmargs').value, existing[0].value);
+  assert.equal(configured.find((entry) => entry.key === 'android.enableProguardInReleaseBuilds').value, 'true');
+  assert.equal(configured.find((entry) => entry.key === 'android.enableMinifyInReleaseBuilds').value, 'true');
+  assert.deepEqual(configureReleaseProperties(configured), configured);
+  assert.equal(existing[1].value, 'internal');
+  assert.equal(configured.some((entry) => entry.key === 'org.gradle.logging.level'), false);
+});
+
 test('keeps application rules and selects the optimized defaults idempotently', () => {
   const original = `android {
   buildTypes {
