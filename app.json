@@ -119,7 +119,8 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "./plugins/withAndroidReleaseOptimization"
     ],
     "experiments": {
       "typedRoutes": true
